@@ -1,0 +1,9 @@
+moviepy==1.0.3
+librosa==0.10.1
+numpy==1.26.4
+opencv-python==4.9.0.80
+ultralytics==8.1.47
+soundfile>=0.12.1
+Pillow>=10.0.0
+mutagen>=1.47.0
+openai-whisper>=20231117

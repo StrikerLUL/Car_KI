@@ -1,0 +1,13 @@
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.pt
+__pycache__/
+input/
+fix.py
+fix2.py
+fix3.py
+machen
+problem
+verbeswern
