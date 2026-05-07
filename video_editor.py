@@ -21,12 +21,15 @@ Abwechslungs-Rhythmus (Transition Matrix):
 """
 
 import os
+import json
+import hashlib
 import random
+import copy
 import numpy as np
 import cv2
 from itertools import groupby
 from moviepy.editor import VideoFileClip, AudioFileClip, concatenate_videoclips
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Any
 from video_analyzer import ClipInfo
 from audio_analyzer import CutPoint
 from audio_effects import (
@@ -402,8 +405,137 @@ def _make_visualizer_filter(spectrum_frames: np.ndarray,
 _TARGET_W = 1080
 _TARGET_H = 1920
 
+_TREND_STYLE_PRESETS: Dict[str, Dict[str, Any]] = {
+    "storytime": {
+        "grade_preset": "neutral",
+        "use_glitch": False,
+        "use_zoom_punch": False,
+        "use_split_screen_glitch": False,
+        "use_intro_text_sequence": True,
+        "use_blend_text": True,
+        "visualizer": False,
+    },
+    "motivation": {
+        "grade_preset": "cinematic",
+        "use_glitch": True,
+        "use_zoom_punch": True,
+        "use_white_flash": True,
+        "use_split_screen_glitch": True,
+        "use_intro_text_sequence": True,
+        "visualizer": True,
+    },
+    "fast_meme_cut": {
+        "grade_preset": "teal_orange",
+        "use_jump_cut_burst": True,
+        "use_speed_ramp": True,
+        "use_reverse_clip": True,
+        "use_glitch": True,
+        "use_blend_text": True,
+        "use_overlap_transition": False,
+        "visualizer": False,
+    },
+}
 
-def _prepare_video(video_path: str) -> VideoFileClip:
+
+def save_edit_template(path: str, template_config: Dict[str, Any]) -> None:
+    """Speichert ein Edit-Template als JSON."""
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(template_config, f, ensure_ascii=True, indent=2)
+
+
+def load_edit_template(path: str) -> Dict[str, Any]:
+    """Lädt ein Edit-Template aus JSON."""
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return data if isinstance(data, dict) else {}
+
+
+def _merge_config(base: Dict[str, Any], overrides: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not overrides:
+        return base
+    out = copy.deepcopy(base)
+    for k, v in overrides.items():
+        if k in out:
+            out[k] = v
+    return out
+
+
+def _estimate_focus_x(video: VideoFileClip, sample_count: int = 12) -> Optional[float]:
+    """
+    Schätzt die horizontale Fokusposition anhand von Bewegungsenergie.
+    Fallback ist None, wenn keine robuste Schätzung möglich ist.
+    """
+    try:
+        if video.duration <= 0.2:
+            return None
+        ts = np.linspace(0.0, max(0.0, video.duration - 0.06), sample_count)
+        prev_gray = None
+        acc_energy = None
+        for t in ts:
+            frame = video.get_frame(float(t))
+            gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+            if prev_gray is not None:
+                diff = cv2.absdiff(gray, prev_gray).astype(np.float32)
+                col_energy = diff.sum(axis=0)
+                acc_energy = col_energy if acc_energy is None else (acc_energy + col_energy)
+            prev_gray = gray
+        if acc_energy is None or float(np.sum(acc_energy)) <= 1e-6:
+            return None
+        x_idx = int(np.argmax(acc_energy))
+        return float(x_idx)
+    except Exception:
+        return None
+
+
+def _detect_hook_moments(highlights_by_video: Dict[str, List[ClipInfo]],
+                         beat_times: List[float]) -> List[float]:
+    """
+    Heuristik für Hook-Momente in den ersten 3 Sekunden.
+    Kombiniert frühe Hard/Normal-Beats mit hohen Clip-Scores.
+    """
+    hook_candidates: List[float] = []
+    early_beats = [b for b in beat_times if b <= 3.0]
+    hook_candidates.extend(early_beats[:3])
+    for clips in highlights_by_video.values():
+        top = sorted(clips, key=lambda c: c.score, reverse=True)[:6]
+        for c in top:
+            if c.timestamp <= 3.0:
+                hook_candidates.append(float(c.timestamp))
+    hook_candidates = sorted(set(round(x, 2) for x in hook_candidates))
+    return hook_candidates[:6]
+
+
+def _estimate_retention_heatmap(schedule_iter: List[CutPoint],
+                                cut_to_clip: Dict[int, ClipInfo]) -> List[Dict[str, Any]]:
+    """
+    Simuliert Retention-Risiko pro Segment.
+    Höhere Scores bedeuten wahrscheinlicheren Absprung.
+    """
+    heatmap: List[Dict[str, Any]] = []
+    for idx, cp in enumerate(schedule_iter):
+        info = cut_to_clip.get(idx)
+        if info is None:
+            continue
+        risk = 0.0
+        if cp.clip_dur_hint >= 1.1:
+            risk += 0.35
+        if info.tag == "calm":
+            risk += 0.30
+        if cp.beat_type == "soft":
+            risk += 0.20
+        if cp.phase in ("intro", "bridge", "outro"):
+            risk += 0.15
+        risk = float(np.clip(risk, 0.0, 1.0))
+        heatmap.append({
+            "time": round(float(cp.time), 2),
+            "phase": cp.phase or "unknown",
+            "tag": info.tag,
+            "risk": round(risk, 2),
+        })
+    return heatmap
+
+
+def _prepare_video(video_path: str, focus_mode: str = "center") -> VideoFileClip:
     video = VideoFileClip(video_path)
     w, h = video.size
 
@@ -411,7 +543,14 @@ def _prepare_video(video_path: str) -> VideoFileClip:
     new_w = int(h * 9 / 16)
     if new_w % 2 != 0:
         new_w += 1
-    cropped = video.crop(x_center=w / 2, y_center=h / 2,
+    x_center = w / 2
+    if focus_mode == "motion":
+        focus_x = _estimate_focus_x(video)
+        if focus_x is not None:
+            left_bound = new_w / 2
+            right_bound = max(left_bound, w - new_w / 2)
+            x_center = float(np.clip(focus_x, left_bound, right_bound))
+    cropped = video.crop(x_center=x_center, y_center=h / 2,
                          width=new_w, height=h).without_audio()
 
     # ── Schritt 2: Auf 1080×1920 skalieren (falls nötig) ─────────────────────
@@ -425,6 +564,38 @@ def _prepare_video(video_path: str) -> VideoFileClip:
               f"{w}×{h} → crop {new_w}×{h} (9:16 HD, bereits korrekte Größe)")
 
     return cropped
+
+
+def _safe_cache_key_blob(payload: Dict[str, object]) -> str:
+    return json.dumps(payload, sort_keys=True, ensure_ascii=True)
+
+
+def _cache_disabled() -> bool:
+    return os.environ.get("KI_AUTO_DISABLE_CACHE", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _audio_fingerprint(audio_path: str) -> Dict[str, object]:
+    st = os.stat(audio_path)
+    return {
+        "path": os.path.abspath(audio_path),
+        "size": int(st.st_size),
+        "mtime_ns": int(st.st_mtime_ns),
+    }
+
+
+def _load_json_cache(path: str) -> Optional[Dict[str, object]]:
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _save_json_cache(path: str, data: Dict[str, object]) -> None:
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=True, indent=2)
 
 
 # ---------------------------------------------------------------------------
@@ -863,6 +1034,13 @@ def create_tiktok_edit(
         use_intro_text_sequence: bool = True, # Schnelle Wort-Sequenz als Intro (@azmiedtz03-Stil)
         use_split_screen_glitch: bool = True, # Vertikale Streifen am Ende
         use_bw_intro: bool = False,         # Schwarz-Weiß in Intro-Phase
+        # ── UX/Produktivität ────────────────────────────────────────────────
+        editing_mode: str = "pro",          # "quick" | "pro"
+        trend_preset: Optional[str] = None, # storytime | motivation | fast_meme_cut
+        template_overrides: Optional[Dict[str, Any]] = None,  # via load_edit_template()
+        auto_reframe: bool = True,          # One-Click Reframe (9:16 Fokus)
+        reframe_focus_mode: str = "motion", # motion | center
+        generate_retention_report: bool = True,
         # ── Musik-Struktur (Song-Phasen) ────────────────────────────────────
         sections=None,                      # List[SongSection] aus detect_song_sections()
         cut_schedule=None,                  # List[CutPoint] aus build_cut_schedule() – empfohlen!
@@ -878,6 +1056,66 @@ def create_tiktok_edit(
     if isinstance(video_paths, str):
         video_paths = [video_paths]
     is_multi = len(video_paths) > 1
+
+    # ── Smart Defaults: Quick/Pro + Presets + Templates ─────────────────────
+    runtime_cfg: Dict[str, Any] = {
+        "grade_preset": grade_preset,
+        "grade_randomize": grade_randomize,
+        "visualizer": visualizer,
+        "use_jump_cut_burst": use_jump_cut_burst,
+        "use_speed_ramp": use_speed_ramp,
+        "use_reverse_clip": use_reverse_clip,
+        "use_white_flash": use_white_flash,
+        "use_freeze_frame": use_freeze_frame,
+        "use_overlap_transition": use_overlap_transition,
+        "use_text_mask": use_text_mask,
+        "use_pip": use_pip,
+        "use_zoom_punch": use_zoom_punch,
+        "use_glitch": use_glitch,
+        "use_letterbox": use_letterbox,
+        "use_blend_text": use_blend_text,
+        "use_intro_text_sequence": use_intro_text_sequence,
+        "use_split_screen_glitch": use_split_screen_glitch,
+        "use_bw_intro": use_bw_intro,
+        "visualizer_height": visualizer_height,
+    }
+    if editing_mode == "quick":
+        runtime_cfg = _merge_config(runtime_cfg, {
+            "grade_randomize": False,
+            "visualizer": False,
+            "use_reverse_clip": False,
+            "use_overlap_transition": False,
+            "use_split_screen_glitch": False,
+            "use_bw_intro": False,
+            "use_pip": is_multi,
+            "use_jump_cut_burst": True,
+            "use_speed_ramp": True,
+            "use_glitch": True,
+            "use_white_flash": True,
+        })
+    if trend_preset:
+        runtime_cfg = _merge_config(runtime_cfg, _TREND_STYLE_PRESETS.get(trend_preset, {}))
+    runtime_cfg = _merge_config(runtime_cfg, template_overrides)
+
+    grade_preset = runtime_cfg["grade_preset"]
+    grade_randomize = runtime_cfg["grade_randomize"]
+    visualizer = runtime_cfg["visualizer"]
+    use_jump_cut_burst = runtime_cfg["use_jump_cut_burst"]
+    use_speed_ramp = runtime_cfg["use_speed_ramp"]
+    use_reverse_clip = runtime_cfg["use_reverse_clip"]
+    use_white_flash = runtime_cfg["use_white_flash"]
+    use_freeze_frame = runtime_cfg["use_freeze_frame"]
+    use_overlap_transition = runtime_cfg["use_overlap_transition"]
+    use_text_mask = runtime_cfg["use_text_mask"]
+    use_pip = runtime_cfg["use_pip"]
+    use_zoom_punch = runtime_cfg["use_zoom_punch"]
+    use_glitch = runtime_cfg["use_glitch"]
+    use_letterbox = runtime_cfg["use_letterbox"]
+    use_blend_text = runtime_cfg["use_blend_text"]
+    use_intro_text_sequence = runtime_cfg["use_intro_text_sequence"]
+    use_split_screen_glitch = runtime_cfg["use_split_screen_glitch"]
+    use_bw_intro = runtime_cfg["use_bw_intro"]
+    visualizer_height = runtime_cfg["visualizer_height"]
 
     # highlight_times kann sein:
     #   a) dict  {video_path: [ClipInfo, ...]}    ← neues Format
@@ -904,10 +1142,14 @@ def create_tiktok_edit(
                            cam_type="external", tag="action", source=vp0)
                   for t in highlight_times]
         }
+    hook_moments = _detect_hook_moments(highlights_by_video, beat_times)
+    if hook_moments:
+        print(f"Hook-Momente (0-3s): {hook_moments}")
 
     # ── Videos laden & croppen ──────────────────────────────────────────────
     print("\nLade & crop Videos...")
-    videos = {vp: _prepare_video(vp) for vp in video_paths}
+    _focus_mode = reframe_focus_mode if auto_reframe else "center"
+    videos = {vp: _prepare_video(vp, focus_mode=_focus_mode) for vp in video_paths}
 
     # ── Audio-Effekte: Gain-Staging + Volume-Dip ─────────────────────────────
     import librosa
@@ -948,16 +1190,46 @@ def create_tiktok_edit(
     # Einmalig: für JEDEN Beat das passende Lyric-Wort ermitteln.
     # Wird für Blend-Text, Intro-Sequenz und Text-Mask genutzt.
     print("\nErmittle beat-synchrone Lyrics (Whisper)...")
-    _fallback_word_pool = extract_music_words(audio_path, use_lyrics=text_mask_use_lyrics)
     _lyrics_max_dist = 0.10 if lyrics_strict_mode else 0.22
     print(f"  Lyrics-Modus: {'STRICT' if lyrics_strict_mode else 'LOOSE'} (max_dist={_lyrics_max_dist:.2f}s)")
-    _synced_words_list  = get_beat_synced_words(
-        audio_path,
-        beat_times=beat_times,
-        fallback_words=_fallback_word_pool if _fallback_word_pool else None,
-        max_dist=_lyrics_max_dist,
-        strict_mode=lyrics_strict_mode,
-    )
+
+    _cache_root = os.path.join(os.getcwd(), ".cache")
+    os.makedirs(_cache_root, exist_ok=True)
+    _lyrics_cache_key = {
+        "version": "lyrics_sync_v1",
+        "audio": _audio_fingerprint(audio_path),
+        "beats": [round(float(b), 3) for b in beat_times],
+        "lyrics_strict_mode": bool(lyrics_strict_mode),
+        "text_mask_use_lyrics": bool(text_mask_use_lyrics),
+        "max_dist": float(_lyrics_max_dist),
+    }
+    _lyrics_cache_hash = hashlib.sha1(
+        _safe_cache_key_blob(_lyrics_cache_key).encode("utf-8")
+    ).hexdigest()
+    _lyrics_cache_path = os.path.join(_cache_root, f"lyrics_sync_{_lyrics_cache_hash}.json")
+    _lyrics_cached = None if _cache_disabled() else _load_json_cache(_lyrics_cache_path)
+
+    if _lyrics_cached:
+        print("  [CACHE] Beat-synchrone Lyrics aus Cache geladen.")
+        _fallback_word_pool = [str(w) for w in _lyrics_cached.get("fallback_word_pool", [])]
+        _synced_words_list = [str(w) for w in _lyrics_cached.get("synced_words_list", [])]
+    else:
+        _fallback_word_pool = extract_music_words(audio_path, use_lyrics=text_mask_use_lyrics)
+        _synced_words_list = get_beat_synced_words(
+            audio_path,
+            beat_times=beat_times,
+            fallback_words=_fallback_word_pool if _fallback_word_pool else None,
+            max_dist=_lyrics_max_dist,
+            strict_mode=lyrics_strict_mode,
+        )
+        if not _cache_disabled():
+            _save_json_cache(
+                _lyrics_cache_path,
+                {
+                    "fallback_word_pool": _fallback_word_pool or [],
+                    "synced_words_list": _synced_words_list or [],
+                },
+            )
     # Lookup: beat_index → Wort (robust gegen fehlende Einträge)
     _beat_word_map: Dict[int, str] = {
         i: w for i, w in enumerate(_synced_words_list)
@@ -1112,7 +1384,9 @@ def create_tiktok_edit(
                     break
         
         if len(_intro_words_to_show) < 2:
-            _seq_words_pool = extract_music_words(audio_path, use_lyrics=text_mask_use_lyrics)
+            _seq_words_pool = _fallback_word_pool or extract_music_words(
+                audio_path, use_lyrics=text_mask_use_lyrics
+            )
             _intro_words_to_show = (
                 random.sample(_seq_words_pool, min(_n_words, len(_seq_words_pool)))
                 if len(_seq_words_pool) >= 2
@@ -1256,6 +1530,17 @@ def create_tiktok_edit(
                 glitch_frames = random.randint(2, 4)
                 print(f"  ⚡ Glitch @ Cut {sched_idx} ({glitch_frames} Frames)")
                 subclip = make_glitch_effect(subclip, glitch_frames=glitch_frames)
+
+            # ── Zoom-Punch auf harten Beats ────────────────────────────────
+            if (use_zoom_punch
+                    and beat_type_now == "hard"
+                    and clip_duration >= 0.16
+                    and random.random() < 0.60):
+                subclip = make_zoom_punch(
+                    subclip,
+                    max_zoom=random.uniform(1.05, 1.12),
+                    fps=video.fps or 60.0,
+                )
 
             # ── Blend-Text (Screen-Mode) auf harten Beats ─────────────────
             # Kommt NACH Glitch (ergänzt, nicht ersetzt) – @editdd032-Stil:
@@ -1413,6 +1698,11 @@ def create_tiktok_edit(
 
     # ── Qualitätswarnungen ──────────────────────────────────────────────────
     _quality_check(tag_stats, video_paths, beat_to_clip)
+    retention_heatmap = _estimate_retention_heatmap(schedule_iter, cut_to_clip) \
+        if generate_retention_report else []
+    if retention_heatmap:
+        top_risk = sorted(retention_heatmap, key=lambda x: x["risk"], reverse=True)[:5]
+        print(f"Retention-Hotspots: {top_risk}")
 
     # ── Video zusammensetzen ────────────────────────────────────────────────
     print("\nSetze finales Video zusammen...")
@@ -1497,7 +1787,14 @@ def create_tiktok_edit(
     print("  Fertig! TikTok-Edit erfolgreich erstellt.")
     print("═"*60)
 
-    return {"tag_stats": tag_stats, "output": output_path}
+    return {
+        "tag_stats": tag_stats,
+        "output": output_path,
+        "hook_moments": hook_moments,
+        "retention_heatmap": retention_heatmap,
+        "active_runtime_config": runtime_cfg,
+        "trend_presets": sorted(list(_TREND_STYLE_PRESETS.keys())),
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -1,8 +1,69 @@
 import os
 import sys
-from audio_analyzer import extract_beats, detect_song_sections, build_cut_schedule
-from video_analyzer import find_highlights, find_highlights_multi
-from video_editor import create_tiktok_edit
+import argparse
+import shutil
+from audio_analyzer import build_cut_schedule
+from video_editor import create_tiktok_edit, load_edit_template, save_edit_template
+from analysis_cache import get_audio_analysis_cached, get_highlights_cached
+from pipeline_config import PipelineConfig
+
+
+def _parse_args():
+    parser = argparse.ArgumentParser(
+        description="Intelligenter Simracing TikTok Editor",
+    )
+    parser.add_argument(
+        "--clear-cache",
+        action="store_true",
+        help="Loescht den .cache-Ordner vor dem Start des Runs.",
+    )
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Ignoriert Cache fuer diesen Run (ohne Cache-Dateien zu loeschen).",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["quick", "pro"],
+        default="pro",
+        help="Bedienmodus fuer den Edit-Builder.",
+    )
+    parser.add_argument(
+        "--preset",
+        choices=["storytime", "motivation", "fast_meme_cut"],
+        default=None,
+        help="Trend-Preset fuer Look und Effekte.",
+    )
+    parser.add_argument(
+        "--template",
+        type=str,
+        default=None,
+        help="JSON-Template mit Feature-Overrides laden.",
+    )
+    parser.add_argument(
+        "--save-template",
+        type=str,
+        default=None,
+        help="Aktuelle Einstellungen als JSON-Template speichern.",
+    )
+    return parser.parse_args()
+
+
+def _clear_cache_if_requested(clear_cache: bool) -> None:
+    if not clear_cache:
+        return
+
+    cache_dir = ".cache"
+    if not os.path.exists(cache_dir):
+        print("  [CACHE] Kein .cache-Ordner vorhanden, nichts zu loeschen.")
+        return
+
+    try:
+        shutil.rmtree(cache_dir)
+        print("  [CACHE] .cache wurde erfolgreich geloescht.")
+    except Exception as e:
+        print(f"  [CACHE] Konnte .cache nicht loeschen: {e}")
+        sys.exit(1)
 
 
 def _ask_video_paths() -> list:
@@ -40,10 +101,20 @@ def _ask_video_paths() -> list:
 
 
 def main():
+    args = _parse_args()
+    if args.no_cache:
+        os.environ["KI_AUTO_DISABLE_CACHE"] = "1"
+
     print("=" * 60)
     print("   Intelligenter Simracing TikTok Editor  v3")
     print("   (Optischer Fluss + Clip-Klassifizierung + Smart-Cut)")
     print("=" * 60)
+    if args.no_cache:
+        print("  [CACHE] --no-cache aktiv: Cache-Lesen/Schreiben ist fuer diesen Run deaktiviert.")
+    print(f"  [MODE] {args.mode}")
+    if args.preset:
+        print(f"  [PRESET] {args.preset}")
+    _clear_cache_if_requested(args.clear_cache)
 
     # ── Video-Eingabe ────────────────────────────────────────────────────────
     video_paths = _ask_video_paths()
@@ -146,19 +217,91 @@ def main():
     use_split_screen_glitch = _ask_bool("Split-Screen-Glitch am Ende? (3 Streifen zeitversetzt)", True)
     use_bw_intro           = _ask_bool("Schwarz-Weiß in Intro-Phase? (klinisch-cleaner Look)", False)
 
+    config = PipelineConfig(
+        video_paths=video_paths,
+        audio_path=audio_path,
+        output_path=output_path,
+        grade_preset=grade_preset,
+        grade_randomize=grade_randomize,
+        vignette_strength=vignette,
+        gain_staging=use_gain_staging,
+        volume_dip=use_volume_dip,
+        visualizer=use_visualizer,
+        visualizer_bars=viz_bars,
+        use_jump_cut_burst=use_jump_cut_burst,
+        use_speed_ramp=use_speed_ramp,
+        use_reverse_clip=use_reverse_clip,
+        use_white_flash=use_white_flash,
+        use_freeze_frame=use_freeze_frame,
+        use_overlap_transition=use_overlap_transition,
+        use_text_mask=use_text_mask,
+        text_mask_word=text_mask_word,
+        text_mask_use_lyrics=text_mask_use_lyrics,
+        use_pip=use_pip,
+        use_zoom_punch=use_zoom_punch,
+        use_glitch=use_glitch,
+        use_letterbox=use_letterbox,
+        use_blend_text=use_blend_text,
+        use_intro_text_sequence=use_intro_text_sequence,
+        lyrics_strict_mode=lyrics_strict_mode,
+        use_split_screen_glitch=use_split_screen_glitch,
+        use_bw_intro=use_bw_intro,
+        editing_mode=args.mode,
+        trend_preset=args.preset,
+        template_path=args.template,
+    )
+
+    template_overrides = None
+    if args.template:
+        if not os.path.exists(args.template):
+            print(f"Fehler: Template-Datei '{args.template}' nicht gefunden.")
+            sys.exit(1)
+        try:
+            template_overrides = load_edit_template(args.template)
+            print(f"  ✓ Template geladen: {args.template}")
+        except Exception as e:
+            print(f"Fehler: Template konnte nicht geladen werden: {e}")
+            sys.exit(1)
+
+    if args.save_template:
+        try:
+            save_payload = {
+                "grade_preset": config.grade_preset,
+                "grade_randomize": config.grade_randomize,
+                "visualizer": config.visualizer,
+                "visualizer_bars": config.visualizer_bars,
+                "use_jump_cut_burst": config.use_jump_cut_burst,
+                "use_speed_ramp": config.use_speed_ramp,
+                "use_reverse_clip": config.use_reverse_clip,
+                "use_white_flash": config.use_white_flash,
+                "use_freeze_frame": config.use_freeze_frame,
+                "use_overlap_transition": config.use_overlap_transition,
+                "use_text_mask": config.use_text_mask,
+                "use_pip": config.use_pip,
+                "use_zoom_punch": config.use_zoom_punch,
+                "use_glitch": config.use_glitch,
+                "use_letterbox": config.use_letterbox,
+                "use_blend_text": config.use_blend_text,
+                "use_intro_text_sequence": config.use_intro_text_sequence,
+                "use_split_screen_glitch": config.use_split_screen_glitch,
+                "use_bw_intro": config.use_bw_intro,
+                "visualizer_height": 0.13,
+            }
+            save_edit_template(args.save_template, save_payload)
+            print(f"  ✓ Template gespeichert: {args.save_template}")
+        except Exception as e:
+            print(f"Fehler: Template konnte nicht gespeichert werden: {e}")
+            sys.exit(1)
+
+    os.makedirs(".cache", exist_ok=True)
+    with open(os.path.join(".cache", "last_run_config.json"), "w", encoding="utf-8") as cfg_f:
+        import json
+        json.dump(config.to_dict(), cfg_f, ensure_ascii=True, indent=2)
+
     # ── Schritt 1: Audio analysieren ─────────────────────────────────────────
     print("\n" + "=" * 60)
-    print("Schritt 1: Analysiere Audio für Beats & Drop...")
-    beats, hard_beats, main_drop_time = extract_beats(audio_path)
-
-    # ── Schritt 1b: Song-Struktur erkennen ───────────────────────────────────
-    print("\n" + "=" * 60)
-    print("Schritt 1b: Erkenne Song-Phasen (Intro / Verse / Buildup / Drop / Bridge / Outro)...")
-    song_sections = detect_song_sections(
-        audio_path,
-        main_drop_time=main_drop_time,
-        beat_times=beats,
-    )
+    print("Schritt 1: Audioanalyse (mit Cache) ...")
+    beats, hard_beats, main_drop_time, song_sections = get_audio_analysis_cached(audio_path)
 
     # ── Schritt 1c: Musik-adaptiven Schnitt-Plan erstellen ───────────────────
     print("\n" + "=" * 60)
@@ -181,59 +324,58 @@ def main():
     print(f"Schritt 2: Analysiere Videos (YOLO + Optischer Fluss + Audio)")
     print(f"  Suche {num_highlights} Highlights – bitte etwas Geduld...")
 
-    if multi:
-        highlights = find_highlights_multi(
-            video_paths,
-            num_clips_total=num_highlights,
-            clip_duration=2.0
-        )
-    else:
-        clips = find_highlights(video_paths[0], num_clips=num_highlights, clip_duration=2.0)
-        highlights = {video_paths[0]: clips}
+    highlights = get_highlights_cached(
+        video_paths,
+        num_clips_total=num_highlights,
+        clip_duration=2.0,
+    )
 
     # ── Schritt 3: Edit erstellen ─────────────────────────────────────────────
     print("\n" + "=" * 60)
     print("Schritt 3: Erstelle den intelligenten TikTok-Edit...")
 
     stats = create_tiktok_edit(
-        video_paths=video_paths,
-        audio_path=audio_path,
+        video_paths=config.video_paths,
+        audio_path=config.audio_path,
         beat_times=beats,
         hard_beat_times=hard_beats,
         main_drop_time=main_drop_time,
         highlight_times=highlights,
-        output_path=output_path,
-        grade_preset=grade_preset,
-        grade_randomize=grade_randomize,
-        vignette_strength=vignette,
-        gain_staging=use_gain_staging,
-        volume_dip=use_volume_dip,
-        visualizer=use_visualizer,
-        visualizer_bars=viz_bars,
-        use_jump_cut_burst=use_jump_cut_burst,
-        use_speed_ramp=use_speed_ramp,
-        use_reverse_clip=use_reverse_clip,
-        use_white_flash=use_white_flash,
-        use_freeze_frame=use_freeze_frame,
-        use_overlap_transition=use_overlap_transition,
-        use_text_mask=use_text_mask,
-        use_pip=use_pip,
-        use_zoom_punch=use_zoom_punch,
-        use_glitch=use_glitch,
-        use_letterbox=use_letterbox,
-        text_mask_word=text_mask_word,
-        text_mask_use_lyrics=text_mask_use_lyrics,
-        lyrics_strict_mode=lyrics_strict_mode,
-        use_blend_text=use_blend_text,
-        use_intro_text_sequence=use_intro_text_sequence,
-        use_split_screen_glitch=use_split_screen_glitch,
-        use_bw_intro=use_bw_intro,
+        output_path=config.output_path,
+        grade_preset=config.grade_preset,
+        grade_randomize=config.grade_randomize,
+        vignette_strength=config.vignette_strength,
+        gain_staging=config.gain_staging,
+        volume_dip=config.volume_dip,
+        visualizer=config.visualizer,
+        visualizer_bars=config.visualizer_bars,
+        use_jump_cut_burst=config.use_jump_cut_burst,
+        use_speed_ramp=config.use_speed_ramp,
+        use_reverse_clip=config.use_reverse_clip,
+        use_white_flash=config.use_white_flash,
+        use_freeze_frame=config.use_freeze_frame,
+        use_overlap_transition=config.use_overlap_transition,
+        use_text_mask=config.use_text_mask,
+        use_pip=config.use_pip,
+        use_zoom_punch=config.use_zoom_punch,
+        use_glitch=config.use_glitch,
+        use_letterbox=config.use_letterbox,
+        text_mask_word=config.text_mask_word,
+        text_mask_use_lyrics=config.text_mask_use_lyrics,
+        lyrics_strict_mode=config.lyrics_strict_mode,
+        use_blend_text=config.use_blend_text,
+        use_intro_text_sequence=config.use_intro_text_sequence,
+        use_split_screen_glitch=config.use_split_screen_glitch,
+        use_bw_intro=config.use_bw_intro,
+        editing_mode=config.editing_mode,
+        trend_preset=config.trend_preset,
+        template_overrides=template_overrides,
         sections=song_sections,
         cut_schedule=cut_schedule,
     )
 
     print("\n" + "=" * 60)
-    print(f"✓ Abgeschlossen! Video gespeichert: {os.path.abspath(output_path)}")
+    print(f"✓ Abgeschlossen! Video gespeichert: {os.path.abspath(config.output_path)}")
     if stats and "tag_stats" in stats:
         print(f"  Clip-Verteilung: {stats['tag_stats']}")
     print("=" * 60)
