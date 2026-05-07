@@ -376,7 +376,8 @@ def get_beat_synced_words(
     audio_path: str,
     beat_times: List[float],
     fallback_words: Optional[List[str]] = None,
-    max_dist: float = 0.15,   # Maximale Distanz (s) zwischen Beat und Wort-Mitte
+    max_dist: float = 0.10,   # Strenger: lieber kein Wort als falsches Wort
+    strict_mode: bool = True,
 ) -> List[str]:
     """
     Gibt für jeden Beat-Zeitpunkt das Wort zurück, das zum exakten Zeitpunkt
@@ -437,7 +438,12 @@ def get_beat_synced_words(
 
     # ── Jedem Beat ein Wort zuordnen ──────────────────────────────────────────
     if not timed:
-        # Kein Whisper → Fallback: Wörter zyklisch verteilen
+        # Kein Whisper/keine gültigen Timings
+        if strict_mode:
+            # Keine "erratenen" Wörter einblenden, damit nichts Off-Beat wirkt.
+            print("  [BEAT-SYNC] Keine Whisper-Timestamps verfügbar – Text-Overlays werden übersprungen (strict).")
+            return [""] * len(beat_times)
+        print("  [BEAT-SYNC] Keine Whisper-Timestamps verfügbar – nutze Fallback-Wörter (loose).")
         return [_fb[i % len(_fb)] for i in range(len(beat_times))]
 
     result_words: List[str] = []
@@ -455,13 +461,18 @@ def get_beat_synced_words(
             matched += 1
             continue
 
-        # Schritt 2: Kein aktives Wort → suche das zeitlich nächste
-        # NUR innerhalb max_dist Sekunden (strenger Schwellenwert!)
+        # Schritt 2: Kein aktives Wort → suche das zeitlich nächste Wortfenster
+        # Distanz wird zum Intervall [start, end] gemessen (nicht nur zur Mitte),
+        # damit angrenzende Wörter zeitlich robuster zugeordnet werden.
         best_word = ""
         best_dist = float("inf")
         for w_start, w_end, w_text in timed:
-            mid  = (w_start + w_end) / 2.0
-            dist = abs(bt - mid)
+            if bt < w_start:
+                dist = w_start - bt
+            elif bt > w_end:
+                dist = bt - w_end
+            else:
+                dist = 0.0
             if dist < best_dist:
                 best_dist = dist
                 best_word = w_text

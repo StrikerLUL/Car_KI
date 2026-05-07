@@ -142,6 +142,7 @@ def main():
     print("🎨 Neue TikTok-Stil Effekte:")
     use_blend_text         = _ask_bool("Blend-Text? (Screen-Modus, Footage scheint durch Text – @editdd032-Stil)", True)
     use_intro_text_sequence = _ask_bool("Intro Text-Sequenz? (3-5 Wörter schnell auf Schwarz vor erstem Beat – @azmiedtz03-Stil)", True)
+    lyrics_strict_mode = _ask_bool("Lyrics Strict Mode? (nur exakte Wörter; sonst lockerer + Fallback)", True)
     use_split_screen_glitch = _ask_bool("Split-Screen-Glitch am Ende? (3 Streifen zeitversetzt)", True)
     use_bw_intro           = _ask_bool("Schwarz-Weiß in Intro-Phase? (klinisch-cleaner Look)", False)
 
@@ -222,6 +223,7 @@ def main():
         use_letterbox=use_letterbox,
         text_mask_word=text_mask_word,
         text_mask_use_lyrics=text_mask_use_lyrics,
+        lyrics_strict_mode=lyrics_strict_mode,
         use_blend_text=use_blend_text,
         use_intro_text_sequence=use_intro_text_sequence,
         use_split_screen_glitch=use_split_screen_glitch,

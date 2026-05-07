@@ -857,6 +857,7 @@ def create_tiktok_edit(
         use_letterbox: bool = True,         # Cinematic Letterbox
         text_mask_word: Optional[str] = None,  # None = aus Musik-Metadaten
         text_mask_use_lyrics: bool = False, # Ob auch Lyrics für die Wortermittlung genutzt werden sollen
+        lyrics_strict_mode: bool = True,    # True = nur exakte Wörter, False = lockerer/Fallback
         # ── TikTok-Style Upgrade (neue Effekte) ─────────────────────────────
         use_blend_text: bool = True,        # Screen-Blend-Text nach Glitch (@editdd032-Stil)
         use_intro_text_sequence: bool = True, # Schnelle Wort-Sequenz als Intro (@azmiedtz03-Stil)
@@ -948,10 +949,14 @@ def create_tiktok_edit(
     # Wird für Blend-Text, Intro-Sequenz und Text-Mask genutzt.
     print("\nErmittle beat-synchrone Lyrics (Whisper)...")
     _fallback_word_pool = extract_music_words(audio_path, use_lyrics=text_mask_use_lyrics)
+    _lyrics_max_dist = 0.10 if lyrics_strict_mode else 0.22
+    print(f"  Lyrics-Modus: {'STRICT' if lyrics_strict_mode else 'LOOSE'} (max_dist={_lyrics_max_dist:.2f}s)")
     _synced_words_list  = get_beat_synced_words(
         audio_path,
         beat_times=beat_times,
         fallback_words=_fallback_word_pool if _fallback_word_pool else None,
+        max_dist=_lyrics_max_dist,
+        strict_mode=lyrics_strict_mode,
     )
     # Lookup: beat_index → Wort (robust gegen fehlende Einträge)
     _beat_word_map: Dict[int, str] = {
@@ -1209,6 +1214,19 @@ def create_tiktok_edit(
             elif cur_phase == "intro":
                 _ramp_profile = "ramp_down"
             _effective_ramp_prob = _ramp_prob_base * RAMP_SCALE_NOW
+            _do_speed_ramp = (
+                _ramp_profile is not None
+                and _effective_ramp_prob > 0.0
+                and random.random() < _effective_ramp_prob
+                and clip_duration >= 0.28
+            )
+            if _do_speed_ramp:
+                subclip = _apply_speed_ramp(
+                    subclip,
+                    tag=info.tag,
+                    profile_key=_ramp_profile,
+                    random_vary=True,
+                )
             # ── Reverse Clip ──────────────────────────────────────────────────
             _do_reverse = (
                 random.random() < REVERSE_PROB_NOW
