@@ -1034,6 +1034,8 @@ def create_tiktok_edit(
         use_intro_text_sequence: bool = True, # Schnelle Wort-Sequenz als Intro (@azmiedtz03-Stil)
         use_split_screen_glitch: bool = True, # Vertikale Streifen am Ende
         use_bw_intro: bool = False,         # Schwarz-Weiß in Intro-Phase
+        watermark_text: Optional[str] = None, # Wasserzeichen Text
+        watermark_opacity: float = 0.4,       # Wasserzeichen Deckkraft
         # ── UX/Produktivität ────────────────────────────────────────────────
         editing_mode: str = "pro",          # "quick" | "pro"
         trend_preset: Optional[str] = None, # storytime | motivation | fast_meme_cut
@@ -1078,6 +1080,8 @@ def create_tiktok_edit(
         "use_intro_text_sequence": use_intro_text_sequence,
         "use_split_screen_glitch": use_split_screen_glitch,
         "use_bw_intro": use_bw_intro,
+        "watermark_text": watermark_text,
+        "watermark_opacity": watermark_opacity,
         "visualizer_height": visualizer_height,
     }
     if editing_mode == "quick":
@@ -1714,6 +1718,15 @@ def create_tiktok_edit(
         print("Wende Cinematic Letterbox an...")
         final_video = apply_letterbox(final_video, bar_fraction=0.07)
     # Hinweis: Farbkorrektur wurde bereits per-Clip angewendet (s.o.)
+
+    # ── Watermark Overlay ────────────────────────────────────────────────────
+    # (Wird nach Letterbox angewendet, damit es oben/unten oder darüber liegen kann)
+    w_text = runtime_cfg.get("watermark_text")
+    w_opacity = runtime_cfg.get("watermark_opacity", 0.4)
+    if w_text:
+        from visual_effects import make_watermark_overlay
+        print(f"Wende Watermark an: '{w_text}' (Opacity: {w_opacity:.1%})...")
+        final_video = make_watermark_overlay(final_video, w_text, opacity=w_opacity)
 
     # ── Audio-Visualizer Overlay ──────────────────────────────────────────────
     if visualizer and spectrum_frames is not None:

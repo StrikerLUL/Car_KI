@@ -35,6 +35,8 @@ class PipelineConfig:
     editing_mode: str = "pro"
     trend_preset: Optional[str] = None
     template_path: Optional[str] = None
+    watermark_text: Optional[str] = None
+    watermark_opacity: float = 0.4
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
