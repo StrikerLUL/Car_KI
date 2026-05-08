@@ -10,7 +10,9 @@ An intelligent, AI-powered automated video editor designed to create high-energy
 - **🎶 Beat-Synchronized Editing:** Automatically analyzes audio to detect beats, drops, and song phases (Intro, Verse, Buildup, Drop) for perfect musical timing.
 - **⚡ Parallel Processing:** Analyzes multiple video sources simultaneously to drastically reduce processing time.
 - **🏎️ Auto-Pilot Mode:** Automatically suggests and applies the best editing style based on the music's BPM and energy.
+- **🖥️ Graphical User Interface:** New Tkinter-based GUI for easy configuration and execution.
 - **✨ Advanced Visual Effects:**
+  - **Watermark:** Add a semi-transparent branding text to your videos.
   - **Text Masking:** Video playing through large typography.
   - **Glitch & Zoom Punches:** Dynamic transitions on hard beats.
   - **Split-Screen Glitch:** Stylish multi-panel endings.
@@ -46,9 +48,12 @@ python main.py
 
 ### Command Line Arguments
 
+- `--gui`: Start the graphical user interface.
 - `--preview`: Export a low-res (540p), 30fps preview quickly.
 - `--mode [quick|pro]`: Choose between faster "quick" mode or more detailed "pro" analysis.
 - `--preset [storytime|motivation|fast_meme_cut]`: Manually select a style (or let Auto-Pilot decide).
+- `--watermark "TEXT"`: Add a watermark text to the final video.
+- `--watermark-opacity 0.4`: Set the opacity of the watermark (0.0 to 1.0).
 - `--clear-cache`: Deletes the `.cache` folder before starting.
 - `--no-cache`: Disables reading/writing to cache for the current run.
 

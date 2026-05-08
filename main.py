@@ -51,6 +51,23 @@ def _parse_args():
         action="store_true",
         help="Schnell-Export: Reduzierte Auflösung (540p), 30 FPS und schnellere Encodierung für schnelle Iteration.",
     )
+    parser.add_argument(
+        "--gui",
+        action="store_true",
+        help="Startet die grafische Benutzeroberfläche.",
+    )
+    parser.add_argument(
+        "--watermark",
+        type=str,
+        default=None,
+        help="Wasserzeichen-Text unten rechts.",
+    )
+    parser.add_argument(
+        "--watermark-opacity",
+        type=float,
+        default=0.4,
+        help="Deckkraft des Wasserzeichens (0.0 - 1.0).",
+    )
     return parser.parse_args()
 
 
@@ -105,8 +122,129 @@ def _ask_video_paths() -> list:
     return paths
 
 
+def run_pipeline(config: PipelineConfig, preview: bool = False, no_cache: bool = False):
+    if no_cache:
+        os.environ["KI_AUTO_DISABLE_CACHE"] = "1"
+
+    print("=" * 60)
+    print("   Intelligenter Simracing TikTok Editor")
+    print("=" * 60)
+
+    os.makedirs(".cache", exist_ok=True)
+    with open(os.path.join(".cache", "last_run_config.json"), "w", encoding="utf-8") as cfg_f:
+        import json
+        json.dump(config.to_dict(), cfg_f, ensure_ascii=True, indent=2)
+
+    # ── Schritt 1: Audio analysieren ─────────────────────────────────────────
+    print("\n" + "=" * 60)
+    print("Schritt 1: Audioanalyse (mit Cache) ...")
+    beats, hard_beats, main_drop_time, song_sections = get_audio_analysis_cached(config.audio_path)
+
+    # ── Schritt 1b: Auto-Pilot Preset Wahl ───────────────────────────────────
+    trend_preset = config.trend_preset
+    if trend_preset is None:
+        from audio_analyzer import suggest_trend_preset
+        auto_preset = suggest_trend_preset(beats, song_sections)
+        print(f"\n  [AUTO-PILOT] Musik-Analyse empfiehlt Preset: '{auto_preset}'")
+        trend_preset = auto_preset
+
+    # ── Schritt 1c: Musik-adaptiven Schnitt-Plan erstellen ───────────────────
+    print("\n" + "=" * 60)
+    print("Schritt 1c: Erstelle adaptiven Schnitt-Plan (Phase-aware, nicht jeder Beat)...")
+    import librosa
+    _y, _sr = librosa.load(config.audio_path)
+    audio_duration = librosa.get_duration(y=_y, sr=_sr)
+    del _y  # RAM freigeben
+    cut_schedule = build_cut_schedule(
+        beat_times=beats,
+        sections=song_sections,
+        hard_beat_times=hard_beats,
+        audio_duration=audio_duration,
+    )
+
+    num_highlights = min(60, max(40, len(beats)))
+
+    # ── Schritt 2: Video(s) analysieren ──────────────────────────────────────
+    print("\n" + "=" * 60)
+    print(f"Schritt 2: Analysiere Videos (YOLO + Optischer Fluss + Audio)")
+    print(f"  Suche {num_highlights} Highlights – bitte etwas Geduld...")
+
+    highlights = get_highlights_cached(
+        config.video_paths,
+        num_clips_total=num_highlights,
+        clip_duration=2.0,
+    )
+
+    # ── Schritt 3: Edit erstellen ─────────────────────────────────────────────
+    print("\n" + "=" * 60)
+    print("Schritt 3: Erstelle den intelligenten TikTok-Edit...")
+
+    template_overrides = None
+    if config.template_path and os.path.exists(config.template_path):
+        template_overrides = load_edit_template(config.template_path)
+
+    stats = create_tiktok_edit(
+        video_paths=config.video_paths,
+        audio_path=config.audio_path,
+        beat_times=beats,
+        hard_beat_times=hard_beats,
+        main_drop_time=main_drop_time,
+        highlight_times=highlights,
+        output_path=config.output_path,
+        grade_preset=config.grade_preset,
+        grade_randomize=config.grade_randomize,
+        vignette_strength=config.vignette_strength,
+        gain_staging=config.gain_staging,
+        volume_dip=config.volume_dip,
+        visualizer=config.visualizer,
+        visualizer_bars=config.visualizer_bars,
+        use_jump_cut_burst=config.use_jump_cut_burst,
+        use_speed_ramp=config.use_speed_ramp,
+        use_reverse_clip=config.use_reverse_clip,
+        use_white_flash=config.use_white_flash,
+        use_freeze_frame=config.use_freeze_frame,
+        use_overlap_transition=config.use_overlap_transition,
+        use_text_mask=config.use_text_mask,
+        use_pip=config.use_pip,
+        use_zoom_punch=config.use_zoom_punch,
+        use_glitch=config.use_glitch,
+        use_letterbox=config.use_letterbox,
+        text_mask_word=config.text_mask_word,
+        text_mask_use_lyrics=config.text_mask_use_lyrics,
+        lyrics_strict_mode=config.lyrics_strict_mode,
+        use_blend_text=config.use_blend_text,
+        use_intro_text_sequence=config.use_intro_text_sequence,
+        use_split_screen_glitch=config.use_split_screen_glitch,
+        use_bw_intro=config.use_bw_intro,
+        watermark_text=config.watermark_text,
+        watermark_opacity=config.watermark_opacity,
+        editing_mode=config.editing_mode,
+        trend_preset=trend_preset,
+        template_overrides=template_overrides,
+        sections=song_sections,
+        cut_schedule=cut_schedule,
+        preview=preview,
+    )
+
+    print("\n" + "=" * 60)
+    print(f"✓ Abgeschlossen! Video gespeichert: {os.path.abspath(config.output_path)}")
+    if stats and "tag_stats" in stats:
+        print(f"  Clip-Verteilung: {stats['tag_stats']}")
+    print("=" * 60)
+
+
 def main():
     args = _parse_args()
+
+    if args.gui:
+        try:
+            from gui import run_gui
+            run_gui()
+            return
+        except ImportError:
+            print("Fehler: gui.py nicht gefunden oder tkinter fehlt.")
+            sys.exit(1)
+
     if args.no_cache:
         os.environ["KI_AUTO_DISABLE_CACHE"] = "1"
 
@@ -216,6 +354,12 @@ def main():
 
     print()
     print("🎨 Neue TikTok-Stil Effekte:")
+    watermark_text = input("  Wasserzeichen Text (leer = aus): ").strip()
+    watermark_text = watermark_text if watermark_text else None
+    watermark_opacity = 0.4
+    if watermark_text:
+        watermark_opacity = _ask_float("  Wasserzeichen Deckkraft (0.0 - 1.0)", 0.4)
+
     use_blend_text         = _ask_bool("Blend-Text? (Screen-Modus, Footage scheint durch Text – @editdd032-Stil)", True)
     use_intro_text_sequence = _ask_bool("Intro Text-Sequenz? (3-5 Wörter schnell auf Schwarz vor erstem Beat – @azmiedtz03-Stil)", True)
     lyrics_strict_mode = _ask_bool("Lyrics Strict Mode? (nur exakte Wörter; sonst lockerer + Fallback)", True)
@@ -251,6 +395,8 @@ def main():
         lyrics_strict_mode=lyrics_strict_mode,
         use_split_screen_glitch=use_split_screen_glitch,
         use_bw_intro=use_bw_intro,
+        watermark_text=watermark_text if watermark_text else args.watermark,
+        watermark_opacity=watermark_opacity if watermark_text else args.watermark_opacity,
         editing_mode=args.mode,
         trend_preset=args.preset,
         template_path=args.template,
@@ -298,100 +444,7 @@ def main():
             print(f"Fehler: Template konnte nicht gespeichert werden: {e}")
             sys.exit(1)
 
-    os.makedirs(".cache", exist_ok=True)
-    with open(os.path.join(".cache", "last_run_config.json"), "w", encoding="utf-8") as cfg_f:
-        import json
-        json.dump(config.to_dict(), cfg_f, ensure_ascii=True, indent=2)
-
-    # ── Schritt 1: Audio analysieren ─────────────────────────────────────────
-    print("\n" + "=" * 60)
-    print("Schritt 1: Audioanalyse (mit Cache) ...")
-    beats, hard_beats, main_drop_time, song_sections = get_audio_analysis_cached(audio_path)
-
-    # ── Schritt 1b: Auto-Pilot Preset Wahl ───────────────────────────────────
-    if args.preset is None:
-        from audio_analyzer import suggest_trend_preset
-        auto_preset = suggest_trend_preset(beats, song_sections)
-        print(f"\n  [AUTO-PILOT] Musik-Analyse empfiehlt Preset: '{auto_preset}'")
-        args.preset = auto_preset
-
-    # ── Schritt 1c: Musik-adaptiven Schnitt-Plan erstellen ───────────────────
-    print("\n" + "=" * 60)
-    print("Schritt 1c: Erstelle adaptiven Schnitt-Plan (Phase-aware, nicht jeder Beat)...")
-    import librosa
-    _y, _sr = librosa.load(audio_path)
-    audio_duration = librosa.get_duration(y=_y, sr=_sr)
-    del _y  # RAM freigeben
-    cut_schedule = build_cut_schedule(
-        beat_times=beats,
-        sections=song_sections,
-        hard_beat_times=hard_beats,
-        audio_duration=audio_duration,
-    )
-
-    num_highlights = min(60, max(40, len(beats)))
-
-    # ── Schritt 2: Video(s) analysieren ──────────────────────────────────────
-    print("\n" + "=" * 60)
-    print(f"Schritt 2: Analysiere Videos (YOLO + Optischer Fluss + Audio)")
-    print(f"  Suche {num_highlights} Highlights – bitte etwas Geduld...")
-
-    highlights = get_highlights_cached(
-        video_paths,
-        num_clips_total=num_highlights,
-        clip_duration=2.0,
-    )
-
-    # ── Schritt 3: Edit erstellen ─────────────────────────────────────────────
-    print("\n" + "=" * 60)
-    print("Schritt 3: Erstelle den intelligenten TikTok-Edit...")
-
-    stats = create_tiktok_edit(
-        video_paths=config.video_paths,
-        audio_path=config.audio_path,
-        beat_times=beats,
-        hard_beat_times=hard_beats,
-        main_drop_time=main_drop_time,
-        highlight_times=highlights,
-        output_path=config.output_path,
-        grade_preset=config.grade_preset,
-        grade_randomize=config.grade_randomize,
-        vignette_strength=config.vignette_strength,
-        gain_staging=config.gain_staging,
-        volume_dip=config.volume_dip,
-        visualizer=config.visualizer,
-        visualizer_bars=config.visualizer_bars,
-        use_jump_cut_burst=config.use_jump_cut_burst,
-        use_speed_ramp=config.use_speed_ramp,
-        use_reverse_clip=config.use_reverse_clip,
-        use_white_flash=config.use_white_flash,
-        use_freeze_frame=config.use_freeze_frame,
-        use_overlap_transition=config.use_overlap_transition,
-        use_text_mask=config.use_text_mask,
-        use_pip=config.use_pip,
-        use_zoom_punch=config.use_zoom_punch,
-        use_glitch=config.use_glitch,
-        use_letterbox=config.use_letterbox,
-        text_mask_word=config.text_mask_word,
-        text_mask_use_lyrics=config.text_mask_use_lyrics,
-        lyrics_strict_mode=config.lyrics_strict_mode,
-        use_blend_text=config.use_blend_text,
-        use_intro_text_sequence=config.use_intro_text_sequence,
-        use_split_screen_glitch=config.use_split_screen_glitch,
-        use_bw_intro=config.use_bw_intro,
-        editing_mode=config.editing_mode,
-        trend_preset=config.trend_preset,
-        template_overrides=template_overrides,
-        sections=song_sections,
-        cut_schedule=cut_schedule,
-        preview=args.preview,
-    )
-
-    print("\n" + "=" * 60)
-    print(f"✓ Abgeschlossen! Video gespeichert: {os.path.abspath(config.output_path)}")
-    if stats and "tag_stats" in stats:
-        print(f"  Clip-Verteilung: {stats['tag_stats']}")
-    print("=" * 60)
+    run_pipeline(config, preview=args.preview, no_cache=args.no_cache)
 
 
 if __name__ == "__main__":

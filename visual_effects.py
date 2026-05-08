@@ -748,3 +748,48 @@ def make_bw_overlay(clip, contrast_boost: float = 1.15) -> object:
         print(f"  [ERR] B&W Overlay: {e}")
         return clip
 
+
+# ---------------------------------------------------------------------------
+# 11. WATERMARK OVERLAY
+# ---------------------------------------------------------------------------
+
+def make_watermark_overlay(clip, text: str, opacity: float = 0.4) -> object:
+    """
+    Legt einen semi-transparenten Text-Watermark unten rechts über den Clip.
+    """
+    try:
+        from PIL import Image, ImageDraw
+        w, h = clip.size
+
+        # Font-Größe basierend auf Video-Höhe (z.B. 3% der Höhe)
+        font_size = max(20, int(h * 0.035))
+        font = _get_pil_font(font_size)
+
+        # Text-Maße
+        tw, th = _measure_text(text, font)
+
+        # Position: unten rechts mit Margin
+        margin = int(w * 0.04)
+        tx = w - tw - margin
+        ty = h - th - margin
+
+        # Watermark-Layer vorab erstellen (Performance!)
+        wm_layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(wm_layer)
+        draw.text((tx, ty), text, font=font, fill=(255, 255, 255, int(255 * opacity)))
+
+        wm_np = np.array(wm_layer).astype(np.float32) / 255.0
+        wm_rgb = wm_np[:, :, :3]
+        wm_alpha = wm_np[:, :, 3:]
+
+        def _filter(get_frame, t):
+            frame = get_frame(t).astype(np.float32) / 255.0
+            # Alpha-Blending: out = (1 - alpha) * frame + alpha * wm_rgb
+            out = (1.0 - wm_alpha) * frame + wm_alpha * wm_rgb
+            return (out * 255.0).astype(np.uint8)
+
+        return clip.fl(_filter, apply_to=["video"], keep_duration=True)
+
+    except Exception as e:
+        print(f"  [ERR] Watermark: {e}")
+        return clip
