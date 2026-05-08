@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, List, Optional, Tuple
 
 from audio_analyzer import SongSection, detect_song_sections, extract_beats
@@ -147,6 +148,38 @@ def get_audio_analysis_cached(audio_path: str) -> Tuple[List[float], List[float]
     return beats, hard_beats, main_drop_time, sections
 
 
+def _process_single_video(
+    vp: str,
+    index: int,
+    total: int,
+    num: int,
+    clip_duration: float,
+    cache_off: bool
+) -> Tuple[str, List[ClipInfo]]:
+    key = {
+        "version": _CACHE_VERSION,
+        "video": _file_fingerprint(vp),
+        "kind": "video_highlights",
+        "num_clips": num,
+        "clip_duration": clip_duration,
+    }
+    path = _cache_path("video_highlights", key)
+
+    if not cache_off:
+        cached = _load_json(path)
+        if cached:
+            print(f"  [CACHE] Highlights geladen: {os.path.basename(vp)}")
+            return vp, _clips_from_json(cached.get("clips", []))
+
+    print(f"\n── Analysiere Quelle {index+1}/{total}: {os.path.basename(vp)} ({num} Highlights) ──")
+    clips = find_highlights(vp, num_clips=num, clip_duration=clip_duration)
+
+    if not cache_off:
+        _save_json(path, {"clips": _clips_to_json(clips)})
+
+    return vp, clips
+
+
 def get_highlights_cached(
     video_paths: List[str],
     num_clips_total: int,
@@ -158,32 +191,23 @@ def get_highlights_cached(
 
     clips_per_video = max(1, num_clips_total // n)
     remainder = num_clips_total - clips_per_video * n
+    cache_off = _cache_disabled()
+
+    tasks = []
+    for i, vp in enumerate(video_paths):
+        num = clips_per_video + (1 if i < remainder else 0)
+        tasks.append((vp, i, n, num, clip_duration, cache_off))
+
     result: Dict[str, List[ClipInfo]] = {}
 
-    for i, vp in enumerate(video_paths):
-        extra = 1 if i < remainder else 0
-        num = clips_per_video + extra
-        key = {
-            "version": _CACHE_VERSION,
-            "video": _file_fingerprint(vp),
-            "kind": "video_highlights",
-            "num_clips": num,
-            "clip_duration": clip_duration,
-        }
-        cache_off = _cache_disabled()
-        path = _cache_path("video_highlights", key)
-        if not cache_off:
-            cached = _load_json(path)
-            if cached:
-                print(f"  [CACHE] Highlights geladen: {os.path.basename(vp)}")
-                result[vp] = _clips_from_json(cached.get("clips", []))
-                continue
-
-        print(f"\n── Analysiere Quelle {i+1}/{n}: {os.path.basename(vp)} ({num} Highlights) ──")
-        clips = find_highlights(vp, num_clips=num, clip_duration=clip_duration)
-        result[vp] = clips
-        if not cache_off:
-            _save_json(path, {"clips": _clips_to_json(clips)})
+    # Use ThreadPoolExecutor for parallel analysis
+    # We limit max_workers to avoid overwhelming GPU/CPU
+    max_workers = min(len(tasks), 4)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(_process_single_video, *task) for task in tasks]
+        for future in futures:
+            vp, clips = future.result()
+            result[vp] = clips
 
     return result
 

@@ -259,6 +259,35 @@ def detect_song_sections(audio_path: str,
     return sections
 
 
+def suggest_trend_preset(beat_times: List[float], sections: List[SongSection]) -> str:
+    """
+    Analysiert BPM und Energie, um ein passendes Trend-Preset vorzuschlagen.
+
+    - Hohe BPM (>128) -> fast_meme_cut (schnelle Schnitte)
+    - Niedrige Energie/Ruhig -> storytime (linearer, ruhiger)
+    - Hohe Energie/Viel Drop -> motivation (effektreich)
+    """
+    if not beat_times:
+        return "storytime"
+
+    # BPM berechnen
+    dur = beat_times[-1] - beat_times[0]
+    bpm = (len(beat_times) / dur) * 60 if dur > 0 else 120
+
+    # Durchschnittliche Energie der Drop-Phasen
+    drop_energies = [s.energy for s in sections if s.phase == "drop"]
+    avg_drop_energy = np.mean(drop_energies) if drop_energies else np.mean([s.energy for s in sections])
+
+    if bpm > 132:
+        return "fast_meme_cut"
+    if avg_drop_energy > 0.75:
+        return "motivation"
+    if bpm < 100:
+        return "storytime"
+
+    return "motivation" # Default
+
+
 def _energy_in_range(energy: np.ndarray, times: np.ndarray,
                       t_start: float, t_end: float) -> np.ndarray:
     """Gibt die Energie-Werte im Zeitbereich [t_start, t_end] zurück."""

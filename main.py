@@ -46,6 +46,11 @@ def _parse_args():
         default=None,
         help="Aktuelle Einstellungen als JSON-Template speichern.",
     )
+    parser.add_argument(
+        "--preview",
+        action="store_true",
+        help="Schnell-Export: Reduzierte Auflösung (540p), 30 FPS und schnellere Encodierung für schnelle Iteration.",
+    )
     return parser.parse_args()
 
 
@@ -303,6 +308,13 @@ def main():
     print("Schritt 1: Audioanalyse (mit Cache) ...")
     beats, hard_beats, main_drop_time, song_sections = get_audio_analysis_cached(audio_path)
 
+    # ── Schritt 1b: Auto-Pilot Preset Wahl ───────────────────────────────────
+    if args.preset is None:
+        from audio_analyzer import suggest_trend_preset
+        auto_preset = suggest_trend_preset(beats, song_sections)
+        print(f"\n  [AUTO-PILOT] Musik-Analyse empfiehlt Preset: '{auto_preset}'")
+        args.preset = auto_preset
+
     # ── Schritt 1c: Musik-adaptiven Schnitt-Plan erstellen ───────────────────
     print("\n" + "=" * 60)
     print("Schritt 1c: Erstelle adaptiven Schnitt-Plan (Phase-aware, nicht jeder Beat)...")
@@ -372,6 +384,7 @@ def main():
         template_overrides=template_overrides,
         sections=song_sections,
         cut_schedule=cut_schedule,
+        preview=args.preview,
     )
 
     print("\n" + "=" * 60)
