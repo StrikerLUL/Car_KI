@@ -1044,6 +1044,7 @@ def create_tiktok_edit(
         # ── Musik-Struktur (Song-Phasen) ────────────────────────────────────
         sections=None,                      # List[SongSection] aus detect_song_sections()
         cut_schedule=None,                  # List[CutPoint] aus build_cut_schedule() – empfohlen!
+        preview: bool = False,              # Schnell-Export (540p, 30fps)
 ) -> Dict[str, any]:
     """
     Erstellt einen beat-synchronen TikTok-Edit und gibt eine Statistik-Dict zurück.
@@ -1725,48 +1726,63 @@ def create_tiktok_edit(
     # ── Audio ────────────────────────────────────────────────────────────────
     final_video = final_video.set_audio(audio)
 
-    # ── Export ──────────────────────────────────────────────────────────────
+    # ── Export Settings ─────────────────────────────────────────────────────
     _n_threads = os.cpu_count() or 8
-    print(f"\nExportiere → {output_path}")
-    print(f"  Auflösung: {_TARGET_W}x{_TARGET_H} | 60 FPS | High Quality | {_n_threads} Threads")
 
-    # Sicherstellen dass das finale Video exakt 1080×1920 hat (gerade Zahlen)
+    export_w, export_h = _TARGET_W, _TARGET_H
+    export_fps = 60
+
+    if preview:
+        export_w, export_h = 540, 960
+        export_fps = 30
+        print(f"\n🚀 [PREVIEW MODE] Exportiere mit reduzierter Last → {output_path}")
+    else:
+        print(f"\n🎬 Exportiere High-Quality Video → {output_path}")
+
+    print(f"  Auflösung: {export_w}x{export_h} | {export_fps} FPS | {_n_threads} Threads")
+
+    # Sicherstellen dass das finale Video die korrekte Größe hat
     fvw, fvh = final_video.size
-    if fvw != _TARGET_W or fvh != _TARGET_H:
-        print(f"  ⚠ Finale Größe {fvw}x{fvh} weicht ab → erzwinge Resize auf {_TARGET_W}x{_TARGET_H}")
-        final_video = final_video.resize((_TARGET_W, _TARGET_H))
+    if fvw != export_w or fvh != export_h:
+        final_video = final_video.resize((export_w, export_h))
 
-    # NVENC: CQ 14 = sehr hohe Qualität (niedriger = besser), VBR mit 80 Mbit/s Peak
-    nvenc_params = [
-        "-cq",         "14",
-        "-rc",         "vbr",
-        "-maxrate",    "80M",
-        "-bufsize",    "160M",
-        "-pix_fmt",    "yuv420p",
-        "-spatial-aq", "1",
-        "-temporal-aq","1",
-        "-b:v",        "0",    # Reine CQ-Kontrolle (kein festes Bitrate-Ziel)
-    ]
-    # libx264: CRF 14 = fast verlustlos für Vorschau
-    x264_params = [
-        "-crf",     "14",
-        "-pix_fmt", "yuv420p",
-        "-movflags", "+faststart",  # Web-Streaming optimiert
-    ]
+    if preview:
+        # Ultra-Fast settings for preview
+        nvenc_params = ["-cq", "28", "-preset", "p1", "-pix_fmt", "yuv420p"]
+        x264_params  = ["-crf", "28", "-preset", "ultrafast", "-pix_fmt", "yuv420p"]
+    else:
+        # NVENC: CQ 14 = sehr hohe Qualität (niedriger = besser), VBR mit 80 Mbit/s Peak
+        nvenc_params = [
+            "-cq",         "14",
+            "-rc",         "vbr",
+            "-maxrate",    "80M",
+            "-bufsize",    "160M",
+            "-pix_fmt",    "yuv420p",
+            "-spatial-aq", "1",
+            "-temporal-aq","1",
+            "-b:v",        "0",    # Reine CQ-Kontrolle (kein festes Bitrate-Ziel)
+        ]
+        # libx264: CRF 14 = fast verlustlos
+        x264_params = [
+            "-crf",     "14",
+            "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart",
+        ]
 
     try:
         final_video.write_videofile(
-            output_path, fps=60, codec="h264_nvenc",
-            audio_codec="aac", audio_bitrate="320k",
-            preset="p4", threads=_n_threads, ffmpeg_params=nvenc_params, logger="bar"
+            output_path, fps=export_fps, codec="h264_nvenc",
+            audio_codec="aac", audio_bitrate="192k" if preview else "320k",
+            preset="p1" if preview else "p4", threads=_n_threads, ffmpeg_params=nvenc_params, logger="bar"
         )
         print("  ✓ NVENC GPU-Export erfolgreich (1080×1920, 60 FPS, CQ14)")
     except Exception as e:
-        print(f"\nNVENC fehlgeschlagen: {e}\nFallback → CPU (libx264, CRF 14)...")
+        print(f"\nNVENC fehlgeschlagen oder nicht verfügbar: {e}\nFallback → CPU (libx264)...")
         final_video.write_videofile(
-            output_path, fps=60, codec="libx264",
-            audio_codec="aac", audio_bitrate="320k",
-            preset="fast", threads=_n_threads, ffmpeg_params=x264_params, logger="bar"
+            output_path, fps=export_fps, codec="libx264",
+            audio_codec="aac", audio_bitrate="192k" if preview else "320k",
+            preset="ultrafast" if preview else "medium", threads=_n_threads,
+            ffmpeg_params=x264_params, logger="bar"
         )
         print("  ✓ CPU-Export erfolgreich (1080×1920, 60 FPS, CRF14)")
 
