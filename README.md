@@ -14,7 +14,8 @@ An intelligent, AI-powered automated video editor designed to create high-energy
 - **✨ Advanced Visual Effects:**
   - **Watermark:** Add a semi-transparent branding text to your videos.
   - **Text Masking:** Video playing through large typography.
-  - **Glitch & Zoom Punches:** Dynamic transitions on hard beats.
+  - **Glitch, Zoom Punches & Camera Shake:** Dynamic and impactful transitions on hard beats.
+  - **Mirror X:** Randomly flip the video horizontally to keep the view fresh and engaging.
   - **Split-Screen Glitch:** Stylish multi-panel endings.
   - **Audio-Reactive Visualizer:** Real-time beat bars.
 - **🎨 Professional Color Grading:** Built-in cinema looks (Teal & Orange, Cinematic) with GPU-accelerated processing.

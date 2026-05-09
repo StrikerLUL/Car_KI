@@ -49,6 +49,8 @@ from visual_effects import (
     make_pip_overlay,
     make_zoom_punch,
     make_glitch_effect,
+    make_camera_shake,
+    make_mirror_x,
     apply_letterbox,
     pick_text_mask_word,
     make_blend_text_overlay,
@@ -409,6 +411,8 @@ _TREND_STYLE_PRESETS: Dict[str, Dict[str, Any]] = {
     "storytime": {
         "grade_preset": "neutral",
         "use_glitch": False,
+        "use_camera_shake": False,
+        "use_mirror_x": False,
         "use_zoom_punch": False,
         "use_split_screen_glitch": False,
         "use_intro_text_sequence": True,
@@ -418,6 +422,8 @@ _TREND_STYLE_PRESETS: Dict[str, Dict[str, Any]] = {
     "motivation": {
         "grade_preset": "cinematic",
         "use_glitch": True,
+        "use_camera_shake": True,
+        "use_mirror_x": False,
         "use_zoom_punch": True,
         "use_white_flash": True,
         "use_split_screen_glitch": True,
@@ -430,6 +436,8 @@ _TREND_STYLE_PRESETS: Dict[str, Dict[str, Any]] = {
         "use_speed_ramp": True,
         "use_reverse_clip": True,
         "use_glitch": True,
+        "use_camera_shake": True,
+        "use_mirror_x": True,
         "use_blend_text": True,
         "use_overlap_transition": False,
         "visualizer": False,
@@ -1025,6 +1033,8 @@ def create_tiktok_edit(
         use_pip: bool = True,               # Picture-in-Picture (Multi-Cam)
         use_zoom_punch: bool = True,        # Zoom-Punch auf harten Beats
         use_glitch: bool = True,            # Glitch-Frame auf harten Beats
+        use_camera_shake: bool = True,      # Camera Shake auf harten Beats
+        use_mirror_x: bool = True,          # Video spiegeln
         use_letterbox: bool = True,         # Cinematic Letterbox
         text_mask_word: Optional[str] = None,  # None = aus Musik-Metadaten
         text_mask_use_lyrics: bool = False, # Ob auch Lyrics für die Wortermittlung genutzt werden sollen
@@ -1075,6 +1085,8 @@ def create_tiktok_edit(
         "use_pip": use_pip,
         "use_zoom_punch": use_zoom_punch,
         "use_glitch": use_glitch,
+        "use_camera_shake": use_camera_shake,
+        "use_mirror_x": use_mirror_x,
         "use_letterbox": use_letterbox,
         "use_blend_text": use_blend_text,
         "use_intro_text_sequence": use_intro_text_sequence,
@@ -1096,6 +1108,8 @@ def create_tiktok_edit(
             "use_jump_cut_burst": True,
             "use_speed_ramp": True,
             "use_glitch": True,
+            "use_camera_shake": True,
+            "use_mirror_x": False,
             "use_white_flash": True,
         })
     if trend_preset:
@@ -1115,6 +1129,8 @@ def create_tiktok_edit(
     use_pip = runtime_cfg["use_pip"]
     use_zoom_punch = runtime_cfg["use_zoom_punch"]
     use_glitch = runtime_cfg["use_glitch"]
+    use_camera_shake = runtime_cfg["use_camera_shake"]
+    use_mirror_x = runtime_cfg["use_mirror_x"]
     use_letterbox = runtime_cfg["use_letterbox"]
     use_blend_text = runtime_cfg["use_blend_text"]
     use_intro_text_sequence = runtime_cfg["use_intro_text_sequence"]
@@ -1535,6 +1551,20 @@ def create_tiktok_edit(
                 glitch_frames = random.randint(2, 4)
                 print(f"  ⚡ Glitch @ Cut {sched_idx} ({glitch_frames} Frames)")
                 subclip = make_glitch_effect(subclip, glitch_frames=glitch_frames)
+
+            # ── Camera Shake auf harten Beats ────────────────────────────
+            if (use_camera_shake
+                    and beat_type_now == "hard"
+                    and clip_duration >= 0.16
+                    and random.random() < 0.50):
+                shake_frames = random.randint(4, 8)
+                print(f"  📳 Camera Shake @ Cut {sched_idx} ({shake_frames} Frames)")
+                subclip = make_camera_shake(subclip, intensity=random.uniform(0.04, 0.08), shake_frames=shake_frames)
+
+            # ── Mirror X Overlay ─────────────────────────────────────────
+            if use_mirror_x and random.random() < 0.15:
+                print(f"  ↔️ Mirror X @ Cut {sched_idx}")
+                subclip = make_mirror_x(subclip)
 
             # ── Zoom-Punch auf harten Beats ────────────────────────────────
             if (use_zoom_punch

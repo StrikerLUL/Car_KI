@@ -350,6 +350,8 @@ def main():
     use_pip        = _ask_bool("Picture-in-Picture? (2. Kamera als kleines Fenster)", True)
     use_zoom_punch = _ask_bool("Zoom-Punch auf harten Beats?", True)
     use_glitch     = _ask_bool("Glitch-Effekt auf harten Beats?", True)
+    use_camera_shake = _ask_bool("Camera-Shake auf harten Beats?", True)
+    use_mirror_x   = _ask_bool("Video horizontal spiegeln (Zufall)?", True)
     use_letterbox  = _ask_bool("Cinematic Letterbox? (schwarze Balken oben/unten)", True)
 
     print()
@@ -389,6 +391,8 @@ def main():
         use_pip=use_pip,
         use_zoom_punch=use_zoom_punch,
         use_glitch=use_glitch,
+        use_camera_shake=use_camera_shake,
+        use_mirror_x=use_mirror_x,
         use_letterbox=use_letterbox,
         use_blend_text=use_blend_text,
         use_intro_text_sequence=use_intro_text_sequence,
@@ -431,6 +435,8 @@ def main():
                 "use_pip": config.use_pip,
                 "use_zoom_punch": config.use_zoom_punch,
                 "use_glitch": config.use_glitch,
+                "use_camera_shake": config.use_camera_shake,
+                "use_mirror_x": config.use_mirror_x,
                 "use_letterbox": config.use_letterbox,
                 "use_blend_text": config.use_blend_text,
                 "use_intro_text_sequence": config.use_intro_text_sequence,

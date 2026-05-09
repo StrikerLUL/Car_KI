@@ -8,6 +8,8 @@ Enthält:
   - make_glitch_effect()    → Chromatic Aberration + Pixel-Verschiebung
   - apply_letterbox()       → Schwarze Balken oben/unten
   - pick_text_mask_word()   → Wort aus Musik-Metadaten
+  - make_camera_shake()     → Wuchtiges Wackeln
+  - make_mirror_x()         → Horizontale Spiegelung
 """
 
 import os
@@ -792,4 +794,91 @@ def make_watermark_overlay(clip, text: str, opacity: float = 0.4) -> object:
 
     except Exception as e:
         print(f"  [ERR] Watermark: {e}")
+        return clip
+
+# ---------------------------------------------------------------------------
+# 12. CAMERA SHAKE OVERLAY
+# ---------------------------------------------------------------------------
+
+def make_camera_shake(clip, intensity: float = 0.05, shake_frames: int = 5) -> object:
+    """
+    Simuliert einen wuchtigen Camera-Shake (z.B. bei einem Drop oder Crash).
+    Verschiebt das Bild zufällig und zoomt leicht ein, um schwarze Ränder zu vermeiden.
+    """
+    try:
+        w, h = clip.size
+        fps = clip.fps or 60.0
+        shake_dur = shake_frames / fps
+        zoom = 1.0 + intensity * 2  # Etwas einzoomen, um Ränder beim Shaken zu verbergen
+
+        # Random offsets vorab berechnen, damit es ruckelig wirkt
+        rng = np.random.default_rng()
+        max_offset_x = int(w * intensity)
+        max_offset_y = int(h * intensity)
+
+        # Generiere offsets für jeden der shake frames
+        offsets = []
+        for _ in range(shake_frames):
+            ox = rng.integers(-max_offset_x, max_offset_x + 1)
+            oy = rng.integers(-max_offset_y, max_offset_y + 1)
+            offsets.append((ox, oy))
+
+        def _shake_frame(get_frame, t: float) -> np.ndarray:
+            frame = get_frame(t).copy()
+            if t > shake_dur:
+                return frame
+
+            # Finde den aktuellen frame index
+            frame_idx = min(int(t * fps), shake_frames - 1)
+            ox, oy = offsets[frame_idx]
+
+            # Zoom crop
+            nw = max(2, int(w / zoom))
+            nh = max(2, int(h / zoom))
+            nw -= nw % 2
+            nh -= nh % 2
+
+            # Center crop + offset
+            x1 = max(0, min(w - nw, (w - nw) // 2 + ox))
+            y1 = max(0, min(h - nh, (h - nh) // 2 + oy))
+            x2 = x1 + nw
+            y2 = y1 + nh
+
+            cropped = frame[y1:y2, x1:x2]
+            if cropped.size == 0:
+                return frame
+
+            if cropped.dtype != np.uint8:
+                cropped = np.clip(cropped, 0, 255).astype(np.uint8)
+
+            try:
+                import cv2
+                return cv2.resize(cropped, (w, h), interpolation=cv2.INTER_LINEAR)
+            except Exception:
+                from PIL import Image as _Img
+                pil = _Img.fromarray(cropped).resize((w, h), _Img.BILINEAR)
+                return np.array(pil)
+
+        return clip.fl(_shake_frame, apply_to=["video"], keep_duration=True)
+
+    except Exception as e:
+        print(f"  [ERR] Camera Shake: {e}")
+        return clip
+
+# ---------------------------------------------------------------------------
+# 13. MIRROR X OVERLAY
+# ---------------------------------------------------------------------------
+
+def make_mirror_x(clip) -> object:
+    """
+    Spiegelt das Video horizontal (links <-> rechts).
+    """
+    try:
+        def _mirror_frame(get_frame, t: float) -> np.ndarray:
+            frame = get_frame(t)
+            return np.fliplr(frame)
+
+        return clip.fl(_mirror_frame, apply_to=["video"], keep_duration=True)
+    except Exception as e:
+        print(f"  [ERR] Mirror X: {e}")
         return clip

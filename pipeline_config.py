@@ -26,6 +26,8 @@ class PipelineConfig:
     use_pip: bool = True
     use_zoom_punch: bool = True
     use_glitch: bool = True
+    use_camera_shake: bool = True
+    use_mirror_x: bool = True
     use_letterbox: bool = True
     use_blend_text: bool = True
     use_intro_text_sequence: bool = True
