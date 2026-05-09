@@ -21,6 +21,7 @@ Abwechslungs-Rhythmus (Transition Matrix):
 """
 
 import os
+import time
 import json
 import hashlib
 import random
@@ -38,6 +39,26 @@ from audio_effects import (
     extract_spectrum_frames,
     save_processed_audio,
 )
+def _write_videofile_with_retry(video_clip, max_retries=3, delay_sec=5.0, **kwargs):
+    """
+    Führt video_clip.write_videofile() aus. Schlägt der Aufruf fehl (z.B. durch
+    einen ffmpeg-Crash, out-of-memory etc.), wird nach kurzer Pause erneut probiert.
+    """
+    last_exception = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            video_clip.write_videofile(**kwargs)
+            return True
+        except Exception as e:
+            last_exception = e
+            print(f"  ⚠ FFMPEG-Export Fehler (Versuch {attempt}/{max_retries}): {e}")
+            if attempt < max_retries:
+                print(f"  Warte {delay_sec} Sekunden vor dem nächsten Versuch...")
+                time.sleep(delay_sec)
+
+    # Wenn alle Versuche fehlgeschlagen sind
+    raise last_exception
+
 from color_grading import (
     ClipGrade,
     apply_grade_to_clip,
@@ -1780,16 +1801,18 @@ def create_tiktok_edit(
         ]
 
     try:
-        final_video.write_videofile(
-            output_path, fps=export_fps, codec="h264_nvenc",
+        _write_videofile_with_retry(
+            final_video, max_retries=3, delay_sec=3.0,
+            filename=output_path, fps=export_fps, codec="h264_nvenc",
             audio_codec="aac", audio_bitrate="192k" if preview else "320k",
             preset="p1" if preview else "p4", threads=_n_threads, ffmpeg_params=nvenc_params, logger="bar"
         )
         print("  ✓ NVENC GPU-Export erfolgreich (1080×1920, 60 FPS, CQ14)")
     except Exception as e:
-        print(f"\nNVENC fehlgeschlagen oder nicht verfügbar: {e}\nFallback → CPU (libx264)...")
-        final_video.write_videofile(
-            output_path, fps=export_fps, codec="libx264",
+        print(f"\nNVENC fehlgeschlagen oder nicht verfügbar nach Retries: {e}\nFallback → CPU (libx264)...")
+        _write_videofile_with_retry(
+            final_video, max_retries=3, delay_sec=3.0,
+            filename=output_path, fps=export_fps, codec="libx264",
             audio_codec="aac", audio_bitrate="192k" if preview else "320k",
             preset="ultrafast" if preview else "medium", threads=_n_threads,
             ffmpeg_params=x264_params, logger="bar"
