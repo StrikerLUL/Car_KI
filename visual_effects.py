@@ -321,7 +321,7 @@ _RACING_WORDS = [
     "FAST", "STORM", "KING", "PURE", "HEAT",
 ]
 
-_WHISPER_WORDS = []
+_WHISPER_WORDS: List[str] = []
 
 def transcribe_audio_for_words(audio_path: str) -> List[str]:
     """Transkribiert das Audio via Whisper und gibt geeignete Wörter zurück."""
@@ -393,7 +393,6 @@ def get_beat_synced_words(
       3. Falls kein aktives Wort: nimm das zeitlich nächste innerhalb max_dist Sekunden
       4. Falls kein Wort innerhalb max_dist → leerer String (kein Overlay!)
     """
-    global _WHISPER_TIMED_WORDS
 
     if not beat_times:
         return []
@@ -566,7 +565,6 @@ def make_blend_text_overlay(
     """
     try:
         from PIL import Image, ImageDraw
-        from moviepy.editor import VideoClip
     except ImportError:
         print("  ✗ Blend-Text: Pillow fehlt → pip install Pillow")
         return clip
