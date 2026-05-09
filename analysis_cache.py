@@ -2,7 +2,7 @@ import hashlib
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 
 from audio_analyzer import SongSection, detect_song_sections, extract_beats
 from video_analyzer import ClipInfo, find_highlights
@@ -20,7 +20,7 @@ def _cache_dir() -> str:
     return root
 
 
-def _file_fingerprint(path: str) -> Dict[str, object]:
+def _file_fingerprint(path: str) -> Dict[str, Any]:
     st = os.stat(path)
     return {
         "path": os.path.abspath(path),
@@ -29,13 +29,13 @@ def _file_fingerprint(path: str) -> Dict[str, object]:
     }
 
 
-def _cache_path(namespace: str, payload: Dict[str, object]) -> str:
+def _cache_path(namespace: str, payload: Dict[str, Any]) -> str:
     blob = json.dumps(payload, sort_keys=True, ensure_ascii=True)
     digest = hashlib.sha1(blob.encode("utf-8")).hexdigest()
     return os.path.join(_cache_dir(), f"{namespace}_{digest}.json")
 
 
-def _load_json(path: str) -> Optional[Dict[str, object]]:
+def _load_json(path: str) -> Optional[Dict[str, Any]]:
     if not os.path.exists(path):
         return None
     try:
@@ -45,12 +45,12 @@ def _load_json(path: str) -> Optional[Dict[str, object]]:
         return None
 
 
-def _save_json(path: str, data: Dict[str, object]) -> None:
+def _save_json(path: str, data: Dict[str, Any]) -> None:
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=True, indent=2)
 
 
-def _sections_to_json(sections: List[SongSection]) -> List[Dict[str, object]]:
+def _sections_to_json(sections: List[SongSection]) -> List[Dict[str, Any]]:
     return [
         {
             "start": float(s.start),
@@ -62,7 +62,7 @@ def _sections_to_json(sections: List[SongSection]) -> List[Dict[str, object]]:
     ]
 
 
-def _sections_from_json(payload: List[Dict[str, object]]) -> List[SongSection]:
+def _sections_from_json(payload: List[Dict[str, Any]]) -> List[SongSection]:
     return [
         SongSection(
             start=float(item["start"]),
@@ -74,7 +74,7 @@ def _sections_from_json(payload: List[Dict[str, object]]) -> List[SongSection]:
     ]
 
 
-def _clips_to_json(clips: List[ClipInfo]) -> List[Dict[str, object]]:
+def _clips_to_json(clips: List[ClipInfo]) -> List[Dict[str, Any]]:
     return [
         {
             "timestamp": float(c.timestamp),
@@ -92,7 +92,7 @@ def _clips_to_json(clips: List[ClipInfo]) -> List[Dict[str, object]]:
     ]
 
 
-def _clips_from_json(payload: List[Dict[str, object]]) -> List[ClipInfo]:
+def _clips_from_json(payload: List[Dict[str, Any]]) -> List[ClipInfo]:
     return [
         ClipInfo(
             timestamp=float(item["timestamp"]),

@@ -29,9 +29,9 @@ import numpy as np
 import cv2
 from itertools import groupby
 from moviepy.editor import VideoFileClip, AudioFileClip, concatenate_videoclips
-from typing import List, Dict, Optional, Tuple, Any
+from typing import Callable, List, Dict, Optional, Tuple, Any
 from video_analyzer import ClipInfo
-from audio_analyzer import CutPoint
+from audio_analyzer import CutPoint, SongSection
 from audio_effects import (
     normalize_audio_gain,
     apply_volume_dip,
@@ -218,7 +218,7 @@ _TAG_RAMP_CONFIG: Dict[str, Tuple[Optional[str], float]] = {
 def _build_time_map(
     duration: float,
     speed_keyframes: List[Tuple[float, float]],
-) -> callable:
+) -> Callable:
     """
     Erstellt eine Zeitabbildungs-Funktion aus einem Speed-Profil.
 
@@ -566,7 +566,7 @@ def _prepare_video(video_path: str, focus_mode: str = "center") -> VideoFileClip
     return cropped
 
 
-def _safe_cache_key_blob(payload: Dict[str, object]) -> str:
+def _safe_cache_key_blob(payload: Dict[str, Any]) -> str:
     return json.dumps(payload, sort_keys=True, ensure_ascii=True)
 
 
@@ -574,7 +574,7 @@ def _cache_disabled() -> bool:
     return os.environ.get("KI_AUTO_DISABLE_CACHE", "").strip().lower() in ("1", "true", "yes", "on")
 
 
-def _audio_fingerprint(audio_path: str) -> Dict[str, object]:
+def _audio_fingerprint(audio_path: str) -> Dict[str, Any]:
     st = os.stat(audio_path)
     return {
         "path": os.path.abspath(audio_path),
@@ -583,7 +583,7 @@ def _audio_fingerprint(audio_path: str) -> Dict[str, object]:
     }
 
 
-def _load_json_cache(path: str) -> Optional[Dict[str, object]]:
+def _load_json_cache(path: str) -> Optional[Dict[str, Any]]:
     if not os.path.exists(path):
         return None
     try:
@@ -593,7 +593,7 @@ def _load_json_cache(path: str) -> Optional[Dict[str, object]]:
         return None
 
 
-def _save_json_cache(path: str, data: Dict[str, object]) -> None:
+def _save_json_cache(path: str, data: Dict[str, Any]) -> None:
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=True, indent=2)
 
@@ -878,7 +878,7 @@ def _get_beat_type(beat_idx: int, beat_time: float,
     return "soft"
 
 
-def _get_section_for_time(t: float, sections) -> Optional[object]:
+def _get_section_for_time(t: float, sections: List[SongSection]) -> Optional[SongSection]:
     """
     Gibt die SongSection zurück, in die der Zeitpunkt `t` fällt.
     Gibt None zurück wenn keine Sektionen definiert sind.
@@ -1047,7 +1047,7 @@ def create_tiktok_edit(
         sections=None,                      # List[SongSection] aus detect_song_sections()
         cut_schedule=None,                  # List[CutPoint] aus build_cut_schedule() – empfohlen!
         preview: bool = False,              # Schnell-Export (540p, 30fps)
-) -> Dict[str, any]:
+) -> Dict[str, Any]:
     """
     Erstellt einen beat-synchronen TikTok-Edit und gibt eine Statistik-Dict zurück.
     """
@@ -1283,7 +1283,7 @@ def create_tiktok_edit(
         clips = highlights_by_video.get(video_paths[0], [])
         best_drop_clip = clips[0] if clips else ClipInfo(
             timestamp=0.0, score=0.0, motion_score=0.0, audio_score=0.0,
-            vehicle_count=0.0, tag="action", source=video_paths[0])
+            vehicle_count=0.0, tag="action", source=video_paths[0], drift_score=0.0, telemetry_score=0.0, cam_type="external")
 
     print(f"Drop-Clip: {best_drop_clip}")
 
@@ -1316,7 +1316,7 @@ def create_tiktok_edit(
                 time=0.0,
                 beat_index=-1,
                 beat_type="soft",
-                phase=(lambda s: s.phase if s else None)(_get_section_for_time(0.0, sections)),
+                phase=sec.phase if (sec := _get_section_for_time(0.0, sections)) else None,
                 clip_dur_hint=beat_times[0],
                 is_forced=False,
             ))
@@ -1325,7 +1325,7 @@ def create_tiktok_edit(
                 time=b,
                 beat_index=i,
                 beat_type=_get_beat_type(i, b, hard_beat_set, i == main_drop_idx),
-                phase=(lambda s: s.phase if s else None)(_get_section_for_time(b, sections)),
+                phase=sec.phase if (sec := _get_section_for_time(b, sections)) else None,
                 clip_dur_hint=(beat_times[i+1] - b) if i+1 < len(beat_times) else 0.5,
             )
             for i, b in enumerate(beat_times)
@@ -1338,11 +1338,11 @@ def create_tiktok_edit(
 
     for sched_idx, cp in enumerate(schedule_iter):
         beat_type     = cp.beat_type
-        current_phase = cp.phase
+
         is_drop       = (cp.beat_index == main_drop_idx)
         min_clip_dur  = max(0.06, cp.clip_dur_hint * 0.5)
 
-        if is_drop:
+        if is_drop and best_drop_clip is not None:
             cut_to_clip[sched_idx] = best_drop_clip
             last_tag = best_drop_clip.tag
             last_source = best_drop_clip.source
@@ -1452,7 +1452,6 @@ def create_tiktok_edit(
                     _tm_src,
                     text=text_mask_word or "DROP",
                     duration=min(1.6, cp.clip_dur_hint),
-                    fps=video.fps or 60.0,
                 )
                 if _tm_clip is not None:
                     if _pending_overlap is not None:
@@ -1543,8 +1542,7 @@ def create_tiktok_edit(
                     and random.random() < 0.60):
                 subclip = make_zoom_punch(
                     subclip,
-                    max_zoom=random.uniform(1.05, 1.12),
-                    fps=video.fps or 60.0,
+                    zoom_start=1.00, zoom_end=random.uniform(1.05, 1.12),
                 )
 
             # ── Blend-Text (Screen-Mode) auf harten Beats ─────────────────
@@ -1580,7 +1578,6 @@ def create_tiktok_edit(
                     subclip,
                     text=_synced_intro_word,
                     duration=clip_duration,
-                    fps=video.fps or 60.0,
                     fade_in=0.08,
                     fade_out=0.08,
                 )

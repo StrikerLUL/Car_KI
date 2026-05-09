@@ -1,3 +1,4 @@
+from typing import List
 import os
 import sys
 import argparse
@@ -99,7 +100,7 @@ def _ask_video_paths() -> list:
     print("  → Fertig:         Einfach Enter ohne Eingabe (nach mind. 1 Video).")
     print()
 
-    paths = []
+    paths: List[str] = []
     while True:
         idx = len(paths) + 1
         prompt = f"  Video {idx} (oder Enter zum Beenden): " if paths else f"  Video {idx}: "
