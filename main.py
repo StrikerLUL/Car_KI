@@ -124,6 +124,12 @@ def _ask_video_paths() -> list:
 
 
 def run_pipeline(config: PipelineConfig, preview: bool = False, no_cache: bool = False):
+    try:
+        config.validate()
+    except (ValueError, FileNotFoundError) as e:
+        print(f"Fehler bei der Konfigurationsvalidierung: {e}")
+        sys.exit(1)
+
     if no_cache:
         os.environ["KI_AUTO_DISABLE_CACHE"] = "1"
 

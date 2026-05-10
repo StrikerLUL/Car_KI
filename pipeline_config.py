@@ -40,5 +40,21 @@ class PipelineConfig:
     watermark_text: Optional[str] = None
     watermark_opacity: float = 0.4
 
+    def validate(self) -> None:
+        import os
+        if not self.video_paths:
+            raise ValueError("video_paths darf nicht leer sein.")
+        for p in self.video_paths:
+            if not os.path.exists(p):
+                raise FileNotFoundError(f"Video-Datei nicht gefunden: {p}")
+        if not os.path.exists(self.audio_path):
+            raise FileNotFoundError(f"Audio-Datei nicht gefunden: {self.audio_path}")
+        if not self.output_path.lower().endswith(".mp4"):
+            raise ValueError("output_path muss auf '.mp4' enden.")
+        if not (0.0 <= self.vignette_strength <= 1.0):
+            raise ValueError(f"vignette_strength muss zwischen 0.0 und 1.0 liegen, ist aber {self.vignette_strength}.")
+        if not (0.0 <= self.watermark_opacity <= 1.0):
+            raise ValueError(f"watermark_opacity muss zwischen 0.0 und 1.0 liegen, ist aber {self.watermark_opacity}.")
+
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
