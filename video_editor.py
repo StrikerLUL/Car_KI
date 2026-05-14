@@ -28,6 +28,7 @@ import random
 import copy
 import numpy as np
 import cv2
+import logging
 from itertools import groupby
 from moviepy.editor import VideoFileClip, AudioFileClip, concatenate_videoclips
 from typing import Callable, List, Dict, Optional, Tuple, Any
@@ -51,7 +52,7 @@ def _write_videofile_with_retry(video_clip, max_retries=3, delay_sec=5.0, **kwar
             return True
         except Exception as e:
             last_exception = e
-            print(f"  ⚠ FFMPEG-Export Fehler (Versuch {attempt}/{max_retries}): {e}")
+            logging.error(f"  ⚠ FFMPEG-Export Fehler (Versuch {attempt}/{max_retries}): {e}")
             if attempt < max_retries:
                 print(f"  Warte {delay_sec} Sekunden vor dem nächsten Versuch...")
                 time.sleep(delay_sec)
@@ -1740,10 +1741,10 @@ def create_tiktok_edit(
                 try:
                     final_clips.append(video.subclip(start_t, start_t + leftover))
                 except Exception as e:
-                    print(f"  ✗ Letzter Clip: {e}")
+                    logging.error(f"  ✗ Letzter Clip: {e}")
 
     if not final_clips:
-        print("Fehler: Konnte keine Clips erstellen.")
+        logging.error("Fehler: Konnte keine Clips erstellen.")
         for v in videos.values():
             v.close()
         audio.close()
