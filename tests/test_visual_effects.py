@@ -94,3 +94,53 @@ def test_get_beat_synced_words_empty_beats():
     """Test get_beat_synced_words with empty beat_times."""
     words = visual_effects.get_beat_synced_words("dummy_audio.mp3", beat_times=[])
     assert words == []
+
+def test_make_text_mask_sequence_empty_words():
+    """Test make_text_mask_sequence with empty words list."""
+    clip = MagicMock()
+    result = visual_effects.make_text_mask_sequence(clip, words=[])
+    assert result == []
+
+def test_get_beat_synced_words_strict_mode_fallback():
+    """Test get_beat_synced_words behavior when strict_mode is False and whisper timed words fail."""
+    # Strict mode False should use fallback words.
+    words = visual_effects.get_beat_synced_words(
+        "dummy_audio.mp3",
+        beat_times=[1.0, 2.0],
+        fallback_words=["TEST", "WORDS"],
+        strict_mode=False
+    )
+    assert words == ["TEST", "WORDS"]
+
+def test_make_glitch_effect_invalid_clip():
+    """Test make_glitch_effect with an invalid clip that raises an exception."""
+    class InvalidClip:
+        @property
+        def size(self):
+            raise AttributeError("Invalid size")
+
+    clip = InvalidClip()
+    result = visual_effects.make_glitch_effect(clip)
+    assert result == clip
+
+def test_make_blend_text_overlay_invalid_clip():
+    """Test make_blend_text_overlay with an invalid clip that raises an exception."""
+    class InvalidClip:
+        @property
+        def size(self):
+            raise AttributeError("Invalid size")
+
+    clip = InvalidClip()
+    result = visual_effects.make_blend_text_overlay(clip, "TEST")
+    assert result == clip
+
+def test_make_watermark_overlay_invalid_clip():
+    """Test make_watermark_overlay with an invalid clip that raises an exception."""
+    class InvalidClip:
+        @property
+        def size(self):
+            raise AttributeError("Invalid size")
+
+    clip = InvalidClip()
+    result = visual_effects.make_watermark_overlay(clip, "WATERMARK")
+    assert result == clip
