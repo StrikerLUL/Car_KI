@@ -88,7 +88,7 @@ def _clear_cache_if_requested(clear_cache: bool) -> None:
         shutil.rmtree(cache_dir)
         print("  [CACHE] .cache wurde erfolgreich geloescht.")
     except Exception as e:
-        print(f"  [CACHE] Konnte .cache nicht loeschen: {e}")
+        logging.error(f"  [CACHE] Konnte .cache nicht loeschen: {e}")
         sys.exit(1)
 
 

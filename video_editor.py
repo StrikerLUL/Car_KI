@@ -1343,7 +1343,7 @@ def create_tiktok_edit(
     if use_cut_schedule:
         print(f"  ✓ Musik-adaptiver Schnitt-Plan aktiv ({len(cut_schedule)} Schnittpunkte)")
     else:
-        print(f"  ⚠ Kein Schnitt-Plan übergeben – Fallback: alle {len(beat_times)} Beats")
+        logging.warning(f"  ⚠ Kein Schnitt-Plan übergeben – Fallback: alle {len(beat_times)} Beats")
 
     # Einheitliche Planungs-Iteration: CutPoints oder Pseudo-CutPoints aus beat_times
     if use_cut_schedule:
@@ -1719,8 +1719,8 @@ def create_tiktok_edit(
             tag_stats[info.tag] = tag_stats.get(info.tag, 0) + 1
 
         except Exception as e:
-            print(f"  ✗ Clip {sched_idx} ({os.path.basename(vp)}, "
-                  f"t={start_t:.2f}s, dur={clip_duration:.2f}s): {e}")
+            logging.error(f"  ✗ Clip {sched_idx} ({os.path.basename(vp)}, "
+                          f"t={start_t:.2f}s, dur={clip_duration:.2f}s): {e}")
 
         current_audio_time = beat + clip_duration
 
@@ -1841,7 +1841,7 @@ def create_tiktok_edit(
         )
         print("  ✓ NVENC GPU-Export erfolgreich (1080×1920, 60 FPS, CQ14)")
     except Exception as e:
-        print(f"\nNVENC fehlgeschlagen oder nicht verfügbar nach Retries: {e}\nFallback → CPU (libx264)...")
+        logging.warning(f"\nNVENC fehlgeschlagen oder nicht verfügbar nach Retries: {e}\nFallback → CPU (libx264)...")
         _write_videofile_with_retry(
             final_video, max_retries=3, delay_sec=3.0,
             filename=output_path, fps=export_fps, codec="libx264",
@@ -1920,8 +1920,8 @@ def _quality_check(tag_stats: Dict[str, int],
     # Zu viele ruhige Clips
     calm_ratio = tag_stats.get("calm", 0) / total
     if calm_ratio > 0.40:
-        print(f"  ⚠  {calm_ratio*100:.0f}% der Clips sind 'calm' "
-              f"→ Video könnte langweilig wirken!")
+        logging.warning(f"  ⚠  {calm_ratio*100:.0f}% der Clips sind 'calm' "
+                        f"→ Video könnte langweilig wirken!")
     else:
         print(f"  ✓  Calm-Anteil: {calm_ratio*100:.0f}% (OK)")
 
@@ -1934,8 +1934,8 @@ def _quality_check(tag_stats: Dict[str, int],
         for src, count in source_counts.items():
             ratio = count / total
             if ratio > 0.70:
-                print(f"  ⚠  '{src}' erscheint in {ratio*100:.0f}% aller Clips "
-                      f"→ mehr Kamerawechsel wären besser!")
+                logging.warning(f"  ⚠  '{src}' erscheint in {ratio*100:.0f}% aller Clips "
+                                f"→ mehr Kamerawechsel wären besser!")
             else:
                 print(f"  ✓  '{src}': {ratio*100:.0f}% (OK)")
 
