@@ -246,6 +246,17 @@ def run_pipeline(config: PipelineConfig, preview: bool = False, no_cache: bool =
 def main():
     args = _parse_args()
 
+    # ── Config-Validierung beim Start ────────────────────────────────────────
+    if args.template and not os.path.exists(args.template):
+        logging.error(f"Fehler: Template-Datei '{args.template}' nicht gefunden.")
+        sys.exit(1)
+
+    if args.save_template:
+        save_dir = os.path.dirname(args.save_template)
+        if save_dir and not os.path.exists(save_dir):
+            logging.error(f"Fehler: Verzeichnis für --save-template '{save_dir}' existiert nicht.")
+            sys.exit(1)
+
     if args.gui:
         try:
             from gui import run_gui
@@ -418,9 +429,6 @@ def main():
 
     template_overrides = None
     if args.template:
-        if not os.path.exists(args.template):
-            logging.error(f"Fehler: Template-Datei '{args.template}' nicht gefunden.")
-            sys.exit(1)
         try:
             template_overrides = load_edit_template(args.template)
             print(f"  ✓ Template geladen: {args.template}")
