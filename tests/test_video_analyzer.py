@@ -120,3 +120,73 @@ def test_clip_info_unexpected_types():
     assert clip.score is None
     assert clip.cam_type == 123
     assert clip.tag is True
+
+from unittest.mock import patch, MagicMock
+
+def test_run_yolo_batch_empty_frames():
+    """Test _run_yolo_batch with empty frames list."""
+    from video_analyzer import _run_yolo_batch
+    assert _run_yolo_batch(MagicMock(), [], None) == []
+
+def test_run_yolo_batch_none_model():
+    """Test _run_yolo_batch with None model."""
+    from video_analyzer import _run_yolo_batch
+    assert _run_yolo_batch(None, ["dummy_frame"], None) == [0.0]
+
+def test_analyze_telemetry_missing_file():
+    """Test _analyze_telemetry returns zeros when file is missing."""
+    import video_analyzer
+    # Set up mock np to return an array of zeros and assert length is right
+    mock_np = MagicMock()
+    mock_np.zeros.return_value = [0.0] * 100
+    with patch.object(video_analyzer, 'np', mock_np):
+        res = video_analyzer._analyze_telemetry("nonexistent_video.mp4", 100, 30.0)
+        assert len(res) == 100
+        assert res == [0.0] * 100
+
+def test_analyze_audio_no_audio():
+    """Test _analyze_audio when video has no audio track."""
+    import video_analyzer
+
+    mock_video = MagicMock()
+    mock_video.audio = None
+
+    mock_np = MagicMock()
+    mock_np.zeros.return_value = [0.0] * 100
+
+    with patch.object(video_analyzer, 'np', mock_np), \
+         patch.object(video_analyzer, 'VideoFileClip', return_value=mock_video):
+
+        res = video_analyzer._analyze_audio("fake_video.mp4", 100, 30.0)
+        assert len(res) == 100
+        assert res == [0.0] * 100
+
+def test_analyze_audio_with_exception():
+    """Test _analyze_audio when an exception occurs during processing."""
+    import video_analyzer
+
+    mock_video = MagicMock()
+    mock_video.audio.write_audiofile.side_effect = Exception("Simulated audio error")
+
+    mock_np = MagicMock()
+    mock_np.zeros.return_value = [0.0] * 50
+
+    with patch.object(video_analyzer, 'np', mock_np), \
+         patch.object(video_analyzer, 'VideoFileClip', return_value=mock_video):
+
+        res = video_analyzer._analyze_audio("fake_video.mp4", 50, 30.0)
+        assert len(res) == 50
+        assert res == [0.0] * 50
+
+def test_find_highlights_multi_multiple_videos():
+    """Test find_highlights_multi with multiple videos."""
+    from video_analyzer import find_highlights_multi, ClipInfo
+
+    mock_clip = ClipInfo(0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, "external", "action", "fake.mp4")
+
+    with patch("video_analyzer.find_highlights", return_value=[mock_clip, mock_clip]):
+        res = find_highlights_multi(["vid1.mp4", "vid2.mp4"], 3, 2.0)
+        assert len(res) == 2
+        assert "vid1.mp4" in res
+        assert "vid2.mp4" in res
+        assert len(res["vid1.mp4"]) == 2
