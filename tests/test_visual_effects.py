@@ -95,6 +95,40 @@ def test_get_beat_synced_words_empty_beats():
     words = visual_effects.get_beat_synced_words("dummy_audio.mp3", beat_times=[])
     assert words == []
 
+class DummyClip:
+    @property
+    def size(self):
+        return (1920, 1080)
+    @property
+    def duration(self):
+        return 5.0
+    @property
+    def fps(self):
+        return 60.0
+    def fl(self, func, apply_to=None, keep_duration=False):
+        return self
+
+def test_make_split_screen_glitch_zero_stripes():
+    """Test that make_split_screen_glitch handles num_stripes=0 without crashing."""
+    clip = DummyClip()
+    result = visual_effects.make_split_screen_glitch(clip, num_stripes=0)
+    assert result == clip
+
+def test_make_watermark_overlay_empty_text():
+    """Test make_watermark_overlay with empty string text and extreme opacity."""
+    clip = DummyClip()
+    result = visual_effects.make_watermark_overlay(clip, text="", opacity=2.5)
+    assert result == clip
+
+def test_make_bw_overlay_extreme_contrast():
+    """Test make_bw_overlay with extreme contrast values."""
+    clip = DummyClip()
+    result = visual_effects.make_bw_overlay(clip, contrast_boost=-5.0)
+    assert result == clip
+
+def test_make_text_mask_sequence_empty_words():
+    """Test make_text_mask_sequence with empty list of words."""
+    result = visual_effects.make_text_mask_sequence(MagicMock(), words=[])
 def test_make_text_mask_sequence_empty_words():
     """Test make_text_mask_sequence with empty words list."""
     clip = MagicMock()
