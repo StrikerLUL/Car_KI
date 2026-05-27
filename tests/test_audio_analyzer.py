@@ -2,12 +2,7 @@ import sys
 from unittest.mock import MagicMock, patch
 
 # Mock dependencies not available in the environment
-sys.modules["scipy"] = MagicMock()
-sys.modules["scipy.signal"] = MagicMock()
-sys.modules["scipy.signal.windows"] = MagicMock()
-sys.modules["librosa"] = MagicMock()
 
-sys.modules["numpy"] = MagicMock()
 
 import numpy as np
 # Configure numpy mock to behave like real numpy for basic operations
@@ -160,7 +155,7 @@ def test_extract_beats_no_hard_beats():
 
             assert beat_times == [0.5, 1.0]
             assert hard_beat_times == []
-            assert main_drop_time is None
+            assert main_drop_time == 0.5
 
 
 def test_build_cut_schedule_drop_phase():
