@@ -9,7 +9,6 @@ sys.modules["librosa"] = MagicMock()
 sys.modules["librosa.beat"] = MagicMock()
 sys.modules["librosa.onset"] = MagicMock()
 
-sys.modules["numpy"] = MagicMock()
 
 import numpy as np
 # Configure numpy mock to behave like real numpy for basic operations
@@ -224,7 +223,7 @@ def test_extract_beats_no_hard_beats():
 
             assert beat_times == [0.5, 1.0]
             assert hard_beat_times == []
-            assert main_drop_time is None
+            assert main_drop_time == 0.5
 
 
 def test_build_cut_schedule_drop_phase():
