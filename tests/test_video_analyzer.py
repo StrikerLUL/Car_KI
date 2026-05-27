@@ -8,6 +8,7 @@ sys.modules["ultralytics"] = MagicMock()
 sys.modules["librosa"] = MagicMock()
 sys.modules["moviepy.editor"] = MagicMock()
 sys.modules["numpy"] = MagicMock()
+sys.modules["tqdm"] = MagicMock()
 
 import numpy as np
 import pytest
