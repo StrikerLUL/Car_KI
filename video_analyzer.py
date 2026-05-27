@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import List, Dict
 from moviepy.editor import VideoFileClip
 from ultralytics import YOLO
+from tqdm import tqdm
 
 # ---------------------------------------------------------------------------
 # GPU-Check (einmalig beim Import)
@@ -410,7 +411,7 @@ def find_highlights(video_path: str, num_clips: int,
         batch_frames.clear()
         batch_meta.clear()
 
-    for sample_idx, current_frame in enumerate(sample_positions):
+    for sample_idx, current_frame in enumerate(tqdm(sample_positions, desc="Analysiere Frames", unit="Frame")):
         cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame)
         ret, frame = cap.read()
         if not ret:
