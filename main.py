@@ -12,6 +12,7 @@ from pipeline_config import PipelineConfig
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s [%(filename)s:%(lineno)d] %(message)s')
 
+
 def _parse_args():
     parser = argparse.ArgumentParser(
         description="Intelligenter Simracing TikTok Editor",
@@ -116,7 +117,7 @@ def _ask_video_paths() -> list:
             continue
 
         if not os.path.exists(raw):
-            print(f"  ✗ Datei nicht gefunden: '{raw}' – bitte erneut versuchen.")
+            logging.error(f"  ✗ Datei nicht gefunden: '{raw}' – bitte erneut versuchen.")
             continue
 
         paths.append(raw)

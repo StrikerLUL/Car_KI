@@ -27,6 +27,7 @@ import hashlib
 import logging
 import random
 import copy
+import logging
 import numpy as np
 import cv2
 import logging
@@ -54,6 +55,7 @@ def _write_videofile_with_retry(video_clip, max_retries=3, delay_sec=5.0, **kwar
             return True
         except Exception as e:
             last_exception = e
+            logging.warning(f"  ⚠ FFMPEG-Export Fehler (Versuch {attempt}/{max_retries}): {e}")
             logging.error(f"FFMPEG-Export Fehler (Versuch {attempt}/{max_retries}): {e}")
             logging.error(f"  ⚠ FFMPEG-Export Fehler (Versuch {attempt}/{max_retries}): {e}")
             if attempt < max_retries:
