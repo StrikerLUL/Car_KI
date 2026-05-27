@@ -244,6 +244,8 @@ def run_pipeline(config: PipelineConfig, preview: bool = False, no_cache: bool =
 
 
 def main():
+    logging.basicConfig(level=logging.INFO, format='%(levelname)s [%(filename)s:%(lineno)d] %(message)s')
+
     args = _parse_args()
 
     # ── Config-Validierung beim Start ────────────────────────────────────────
@@ -429,6 +431,9 @@ def main():
 
     template_overrides = None
     if args.template:
+        if not os.path.exists(args.template):
+            logging.error(f"Fehler: Template-Datei '{args.template}' nicht gefunden.")
+            sys.exit(1)
         try:
             template_overrides = load_edit_template(args.template)
             print(f"  ✓ Template geladen: {args.template}")
