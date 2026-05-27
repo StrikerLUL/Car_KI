@@ -12,6 +12,7 @@ from pipeline_config import PipelineConfig
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s [%(filename)s:%(lineno)d] %(message)s')
 
+
 def _parse_args():
     parser = argparse.ArgumentParser(
         description="Intelligenter Simracing TikTok Editor",
@@ -116,7 +117,7 @@ def _ask_video_paths() -> list:
             continue
 
         if not os.path.exists(raw):
-            print(f"  ✗ Datei nicht gefunden: '{raw}' – bitte erneut versuchen.")
+            logging.error(f"  ✗ Datei nicht gefunden: '{raw}' – bitte erneut versuchen.")
             continue
 
         paths.append(raw)
@@ -244,6 +245,8 @@ def run_pipeline(config: PipelineConfig, preview: bool = False, no_cache: bool =
 
 
 def main():
+    logging.basicConfig(level=logging.INFO, format='%(levelname)s [%(filename)s:%(lineno)d] %(message)s')
+
     args = _parse_args()
 
     # ── Config-Validierung beim Start ────────────────────────────────────────
@@ -429,6 +432,9 @@ def main():
 
     template_overrides = None
     if args.template:
+        if not os.path.exists(args.template):
+            logging.error(f"Fehler: Template-Datei '{args.template}' nicht gefunden.")
+            sys.exit(1)
         try:
             template_overrides = load_edit_template(args.template)
             print(f"  ✓ Template geladen: {args.template}")
