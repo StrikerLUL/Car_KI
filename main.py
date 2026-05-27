@@ -10,6 +10,8 @@ from analysis_cache import get_audio_analysis_cached, get_highlights_cached
 from pipeline_config import PipelineConfig
 
 
+logging.basicConfig(level=logging.INFO, format='%(levelname)s [%(filename)s:%(lineno)d] %(message)s')
+
 def _parse_args():
     parser = argparse.ArgumentParser(
         description="Intelligenter Simracing TikTok Editor",
@@ -86,7 +88,7 @@ def _clear_cache_if_requested(clear_cache: bool) -> None:
         shutil.rmtree(cache_dir)
         print("  [CACHE] .cache wurde erfolgreich geloescht.")
     except Exception as e:
-        print(f"  [CACHE] Konnte .cache nicht loeschen: {e}")
+        logging.error(f"  [CACHE] Konnte .cache nicht loeschen: {e}")
         sys.exit(1)
 
 
@@ -245,6 +247,17 @@ def main():
     logging.basicConfig(level=logging.INFO, format='%(levelname)s [%(filename)s:%(lineno)d] %(message)s')
 
     args = _parse_args()
+
+    # ── Config-Validierung beim Start ────────────────────────────────────────
+    if args.template and not os.path.exists(args.template):
+        logging.error(f"Fehler: Template-Datei '{args.template}' nicht gefunden.")
+        sys.exit(1)
+
+    if args.save_template:
+        save_dir = os.path.dirname(args.save_template)
+        if save_dir and not os.path.exists(save_dir):
+            logging.error(f"Fehler: Verzeichnis für --save-template '{save_dir}' existiert nicht.")
+            sys.exit(1)
 
     if args.gui:
         try:
