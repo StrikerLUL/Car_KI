@@ -1928,6 +1928,8 @@ def _quality_check(tag_stats: Dict[str, int],
     # Zu viele ruhige Clips
     calm_ratio = tag_stats.get("calm", 0) / total
     if calm_ratio > 0.40:
+        logging.warning(f"  ⚠  {calm_ratio*100:.0f}% der Clips sind 'calm' "
+              f"→ Video könnte langweilig wirken!")
         logging.warning(f"{calm_ratio*100:.0f}% der Clips sind 'calm' → Video könnte langweilig wirken!")
         logging.warning(f"  ⚠  {calm_ratio*100:.0f}% der Clips sind 'calm' "
                         f"→ Video könnte langweilig wirken!")
@@ -1943,6 +1945,8 @@ def _quality_check(tag_stats: Dict[str, int],
         for src, count in source_counts.items():
             ratio = count / total
             if ratio > 0.70:
+                logging.warning(f"  ⚠  '{src}' erscheint in {ratio*100:.0f}% aller Clips "
+                      f"→ mehr Kamerawechsel wären besser!")
                 logging.warning(f"'{src}' erscheint in {ratio*100:.0f}% aller Clips → mehr Kamerawechsel wären besser!")
                 logging.warning(f"  ⚠  '{src}' erscheint in {ratio*100:.0f}% aller Clips "
                                 f"→ mehr Kamerawechsel wären besser!")
