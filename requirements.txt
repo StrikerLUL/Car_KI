@@ -7,3 +7,4 @@ soundfile>=0.12.1
 Pillow>=10.0.0
 mutagen>=1.47.0
 openai-whisper>=20231117
+tqdm
