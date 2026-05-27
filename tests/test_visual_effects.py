@@ -95,6 +95,17 @@ def test_get_beat_synced_words_empty_beats():
     words = visual_effects.get_beat_synced_words("dummy_audio.mp3", beat_times=[])
     assert words == []
 
+def test_make_text_mask_clip_invalid_clip():
+    """Test that make_text_mask_clip handles invalid clips by returning None."""
+    class InvalidClip:
+        @property
+        def size(self):
+            raise AttributeError("Invalid size")
+
+    clip = InvalidClip()
+    result = visual_effects.make_text_mask_clip(clip, "TEST")
+    assert result is None
+
 def test_make_glitch_effect_invalid_clip():
     """Test that make_glitch_effect handles exceptions correctly."""
     class InvalidClip:
@@ -105,6 +116,22 @@ def test_make_glitch_effect_invalid_clip():
     clip = InvalidClip()
     result = visual_effects.make_glitch_effect(clip)
     assert result == clip
+
+def test_make_glitch_effect_valid_clip():
+    """Test that make_glitch_effect returns a modified clip for valid input."""
+    class ValidClip:
+        @property
+        def size(self):
+            return (1920, 1080)
+        @property
+        def fps(self):
+            return 60.0
+        def fl(self, *args, **kwargs):
+            return "ModifiedClip"
+
+    clip = ValidClip()
+    result = visual_effects.make_glitch_effect(clip)
+    assert result == "ModifiedClip"
 
 def test_make_bw_overlay_invalid_clip():
     """Test that make_bw_overlay handles exceptions correctly."""
@@ -125,6 +152,7 @@ def test_make_watermark_overlay_invalid_clip():
 
     clip = InvalidClip()
     result = visual_effects.make_watermark_overlay(clip, "watermark")
+    result = visual_effects.make_watermark_overlay(clip, "TEST")
     assert result == clip
 
 def test_make_split_screen_glitch_invalid_clip():
@@ -142,4 +170,18 @@ def test_make_text_mask_sequence_empty_words():
     """Test make_text_mask_sequence with empty words list."""
     clip = MagicMock()
     result = visual_effects.make_text_mask_sequence(clip, words=[])
+def test_make_blend_text_overlay_invalid_clip():
+    """Test that make_blend_text_overlay handles exceptions correctly."""
+    class InvalidClip:
+        @property
+        def size(self):
+            raise AttributeError("Invalid size")
+
+    clip = InvalidClip()
+    result = visual_effects.make_blend_text_overlay(clip, "TEST")
+    assert result == clip
+
+def test_make_text_mask_sequence_empty_words():
+    """Test that make_text_mask_sequence returns empty list when given empty words."""
+    result = visual_effects.make_text_mask_sequence(MagicMock(), [])
     assert result == []
