@@ -31,6 +31,7 @@ import logging
 import numpy as np
 import cv2
 import logging
+from tqdm import tqdm
 from itertools import groupby
 from moviepy.editor import VideoFileClip, AudioFileClip, concatenate_videoclips
 from typing import Callable, List, Dict, Optional, Tuple, Any
@@ -1450,6 +1451,7 @@ def create_tiktok_edit(
 
     _pending_overlap = None
 
+    for sched_idx, cp in tqdm(enumerate(schedule_iter), total=len(schedule_iter), desc="Videoclips verarbeiten"):
     for sched_idx, cp in enumerate(tqdm(schedule_iter, desc="Generiere Clips", unit="Clip")):
         beat          = cp.time
         clip_duration = cp.clip_dur_hint
