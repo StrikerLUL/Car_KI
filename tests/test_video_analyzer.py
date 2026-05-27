@@ -120,3 +120,74 @@ def test_clip_info_unexpected_types():
     assert clip.score is None
     assert clip.cam_type == 123
     assert clip.tag is True
+
+from unittest.mock import MagicMock, patch
+import video_analyzer
+
+def test_check_cuda_exception(monkeypatch):
+    """Test that _check_cuda returns False if an exception is raised."""
+    mock_cv2 = MagicMock()
+    mock_cv2.cuda.getCudaEnabledDeviceCount.side_effect = Exception("Simulated CUDA error")
+    monkeypatch.setattr(video_analyzer, 'cv2', mock_cv2)
+
+    assert video_analyzer._check_cuda() == False
+
+def test_analyze_telemetry_missing_file(monkeypatch):
+    """Test that _analyze_telemetry returns an array of zeros if CSV is missing."""
+    monkeypatch.setattr(video_analyzer.os.path, 'exists', MagicMock(return_value=False))
+
+    scores = video_analyzer._analyze_telemetry("fake_video.mp4", 10, 30.0)
+    assert np.array_equal(scores, np.zeros(10, dtype=np.float32))
+
+def test_analyze_telemetry_exception(monkeypatch):
+    """Test that _analyze_telemetry handles exceptions and returns zeros."""
+    monkeypatch.setattr(video_analyzer.os.path, 'exists', MagicMock(return_value=True))
+
+    # Mock pandas to raise exception
+    mock_pd = MagicMock()
+    mock_pd.read_csv.side_effect = Exception("Simulated pandas error")
+
+    # We patch builtins.__import__ to return our mock_pd when pandas is imported
+    original_import = __import__
+    def side_effect_import(name, *args, **kwargs):
+        if name == 'pandas':
+            return mock_pd
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr('builtins.__import__', side_effect_import)
+
+    scores = video_analyzer._analyze_telemetry("fake_video.mp4", 10, 30.0)
+    assert np.array_equal(scores, np.zeros(10, dtype=np.float32))
+
+def test_analyze_audio_empty_audio(monkeypatch):
+    """Test that _analyze_audio returns zeros when video has no audio."""
+    mock_VideoFileClip = MagicMock()
+    mock_video = MagicMock()
+    mock_video.audio = None
+    mock_VideoFileClip.return_value = mock_video
+    monkeypatch.setattr(video_analyzer, 'VideoFileClip', mock_VideoFileClip)
+
+    scores = video_analyzer._analyze_audio("fake_video.mp4", 10, 30.0)
+    assert np.array_equal(scores, np.zeros(10, dtype=np.float32))
+    mock_video.close.assert_called_once()
+
+def test_run_yolo_batch_none_model():
+    """Test _run_yolo_batch returns list of zeros if model is None."""
+    frames = [np.zeros((100, 100, 3)), np.zeros((100, 100, 3))]
+    result = video_analyzer._run_yolo_batch(None, frames, [2, 3])
+    assert result == [0.0, 0.0]
+
+def test_run_yolo_batch_empty_frames():
+    """Test _run_yolo_batch returns empty list if frames are empty."""
+    mock_model = MagicMock()
+    result = video_analyzer._run_yolo_batch(mock_model, [], [2, 3])
+    assert result == []
+
+def test_run_yolo_batch_exception():
+    """Test _run_yolo_batch handles exceptions gracefully."""
+    mock_model = MagicMock()
+    mock_model.predict.side_effect = Exception("Simulated YOLO error")
+    frames = [np.zeros((100, 100, 3))]
+
+    result = video_analyzer._run_yolo_batch(mock_model, frames, [2, 3])
+    assert result == [0.0]
