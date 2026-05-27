@@ -11,7 +11,7 @@ mock_modules = {
 
 with patch.dict('sys.modules', mock_modules):
     import color_grading
-    from color_grading import ClipGrade, build_per_clip_grade, _get_vignette_cpu, grade_frame
+    from color_grading import ClipGrade, build_per_clip_grade, _get_vignette_cpu, grade_frame, _apply_base_grade_cpu, _lut_cinematic_np, _lut_teal_orange_np, apply_grade_to_clip
 
 
 def test_clip_grade_defaults():
@@ -121,3 +121,85 @@ def test_grade_frame_wrong_file_format(monkeypatch):
     result = grade_frame(frame_mock, grade)
     assert result == "SUCCESS_UNEXPECTED"
     mock_cpu.assert_called_once_with(frame_mock, grade)
+
+
+def test_apply_base_grade_cpu_edge_cases():
+    """Test edge cases for _apply_base_grade_cpu."""
+    mock_img_f = MagicMock()
+    # It attempts to add brightness to img_f. If img_f is an invalid type, this raises TypeError.
+
+    with pytest.raises(TypeError):
+        _apply_base_grade_cpu("not_an_array", 1.0, 1.0, 0.0)
+
+    # Mock img_f needs to raise an exception when added to a string
+    mock_img_f.__add__.side_effect = TypeError("Invalid type")
+
+    with pytest.raises(TypeError):
+        _apply_base_grade_cpu(mock_img_f, "not_a_float", 1.0, "not_a_float")
+
+
+def test_lut_cinematic_np_extreme_values():
+    """Test _lut_cinematic_np handles empty arrays or unexpected shapes safely."""
+    # Create mock objects to simulate numpy arrays that return empty shapes
+    mock_img_f = MagicMock()
+    mock_lum3 = MagicMock()
+
+    # We shouldn't raise a python error when dealing with valid empty numpy arrays,
+    # np.clip handles this without throwing python errors.
+    mock_np = MagicMock()
+    mock_empty_array = MagicMock()
+
+    mock_np.abs.return_value = mock_empty_array
+    mock_np.clip.return_value = mock_empty_array
+
+    # Simulate empty array operations
+    mock_img_f.__mul__.return_value = mock_empty_array
+    mock_lum3.__mul__.return_value = mock_empty_array
+    mock_empty_array.copy.return_value = mock_empty_array
+    mock_empty_array.__mul__.return_value = mock_empty_array
+    mock_empty_array.__add__.return_value = mock_empty_array
+    mock_empty_array.__sub__.return_value = mock_empty_array
+    mock_empty_array.__rsub__.return_value = mock_empty_array
+
+    with patch.object(color_grading, 'np', mock_np):
+        try:
+            _lut_cinematic_np(mock_img_f, mock_lum3)
+        except Exception as e:
+            pytest.fail(f"Raised exception on empty array: {e}")
+
+
+def test_apply_grade_to_clip_invalid_clip():
+    """Test apply_grade_to_clip handles invalid clip without an fl_image method."""
+    mock_clip = object()  # No fl_image method
+    grade = ClipGrade()
+
+    with pytest.raises(AttributeError):
+        apply_grade_to_clip(mock_clip, grade)
+
+
+def test_lut_teal_orange_np_extreme_values():
+    """Test _lut_teal_orange_np correctly handles empty arrays or unexpected shapes safely."""
+    # Create mock objects to simulate numpy arrays that return empty shapes
+    mock_img_f = MagicMock()
+    mock_lum3 = MagicMock()
+
+    # We shouldn't raise a python error when dealing with valid empty numpy arrays,
+    # np.clip handles this without throwing python errors.
+    mock_np = MagicMock()
+    mock_empty_array = MagicMock()
+    mock_np.clip.return_value = mock_empty_array
+
+    # Simulate empty array operations
+    mock_img_f.__mul__.return_value = mock_empty_array
+    mock_lum3.__mul__.return_value = mock_empty_array
+    mock_empty_array.copy.return_value = mock_empty_array
+    mock_empty_array.__mul__.return_value = mock_empty_array
+    mock_empty_array.__add__.return_value = mock_empty_array
+    mock_empty_array.__sub__.return_value = mock_empty_array
+    mock_empty_array.__rsub__.return_value = mock_empty_array
+
+    with patch.object(color_grading, 'np', mock_np):
+        try:
+            _lut_teal_orange_np(mock_img_f, mock_lum3)
+        except Exception as e:
+            pytest.fail(f"Raised exception on empty array: {e}")

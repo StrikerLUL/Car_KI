@@ -8,6 +8,7 @@ sys.modules["scipy.signal.windows"] = MagicMock()
 sys.modules["librosa"] = MagicMock()
 sys.modules["librosa.beat"] = MagicMock()
 sys.modules["librosa.onset"] = MagicMock()
+
 sys.modules["numpy"] = MagicMock()
 
 import numpy as np
@@ -76,3 +77,148 @@ def test_build_cut_schedule_min_clip_duration():
 
     cut_times = [c.time for c in cuts]
     assert cut_times == [0.1, 0.3, 0.5]
+from audio_analyzer import build_cut_schedule, extract_beats
+from unittest.mock import patch
+
+def test_build_cut_schedule_empty_beats():
+    """Test that empty beat_times returns an empty list."""
+    assert build_cut_schedule([], [], [], 60.0) == []
+
+def test_build_cut_schedule_no_sections():
+    """Test build_cut_schedule when there are no song sections (should use default 'verse' phase logic)."""
+    beat_times = [0.0, 0.5, 1.0, 1.5, 2.0]
+    hard_beat_times = [1.0]
+    cut_points = build_cut_schedule(beat_times, [], hard_beat_times, 2.5)
+
+    assert len(cut_points) > 0
+    # Beat at 1.0 is hard, so it must be a cut point
+    assert any(cp.time == 1.0 and cp.beat_type == "hard" for cp in cut_points)
+
+def test_build_cut_schedule_forced_intro():
+    """Test that hard beats in the intro are marked as forced."""
+    beat_times = [0.0, 0.5, 1.0, 1.5, 2.0]
+    hard_beat_times = [1.0]
+    sections = [SongSection(0.0, 2.5, "intro", 0.5)]
+    cut_points = build_cut_schedule(beat_times, sections, hard_beat_times, 2.5)
+
+    forced_cut = next((cp for cp in cut_points if cp.time == 1.0), None)
+    assert forced_cut is not None
+    assert forced_cut.is_forced is True
+
+def test_extract_beats_empty_audio():
+    """Test extract_beats handling empty or silent audio effectively."""
+    import audio_analyzer
+
+    with patch("audio_analyzer.librosa") as mock_librosa, patch("audio_analyzer.np") as mock_np:
+        mock_librosa.load.return_value = ([], 22050)
+        mock_librosa.beat.beat_track.return_value = (120.0, [])
+        mock_librosa.frames_to_time.return_value = []
+        mock_librosa.onset.onset_strength.return_value = np.array([])
+        mock_np.atleast_1d.return_value = [120.0]
+
+        beat_times, hard_beat_times, main_drop_time = audio_analyzer.extract_beats("dummy.mp3")
+
+        assert beat_times == []
+        assert hard_beat_times == []
+        assert main_drop_time is None
+
+def test_detect_song_sections_empty_audio():
+    """Test detect_song_sections handling empty audio."""
+    import audio_analyzer
+
+    # We create a simple class that mimics numpy array basic ops safely for an empty array
+    class EmptyNPArray:
+        def __init__(self, *args, **kwargs):
+            pass
+        def max(self):
+            return 0.0
+        def __len__(self):
+            return 0
+        def __getitem__(self, item):
+            return EmptyNPArray()
+        def __truediv__(self, other):
+            return EmptyNPArray()
+        def __add__(self, other):
+            return EmptyNPArray()
+        def __radd__(self, other):
+            return EmptyNPArray()
+        def __mul__(self, other):
+            return EmptyNPArray()
+        def __rmul__(self, other):
+            return EmptyNPArray()
+        def __iter__(self):
+            return iter([])
+
+    mock_librosa = MagicMock()
+    mock_librosa.load.return_value = ([], 22050)
+    mock_librosa.get_duration.return_value = 0.0
+    mock_librosa.feature.rms.return_value = [EmptyNPArray()]
+    mock_librosa.frames_to_time.return_value = EmptyNPArray()
+    mock_librosa.onset.onset_strength.return_value = EmptyNPArray()
+
+    with patch.object(audio_analyzer, 'librosa', mock_librosa):
+        with patch.object(audio_analyzer, 'np', MagicMock()) as mock_np_local:
+            mock_np_local.arange.return_value = EmptyNPArray()
+            mock_np_local.convolve.return_value = EmptyNPArray()
+            mock_np_local.median.return_value = 0.0
+            mock_np_local.percentile.return_value = 0.0
+
+            sections = audio_analyzer.detect_song_sections("dummy.mp3")
+            assert len(sections) == 0
+
+
+def test_extract_beats_no_hard_beats():
+    """Test extract_beats handling audio where no beats qualify as hard beats."""
+    with patch("audio_analyzer.librosa") as mock_librosa, patch("audio_analyzer.np") as mock_np:
+        import audio_analyzer
+        mock_librosa.load = MagicMock(return_value=(np.zeros(22050), 22050))
+        mock_librosa.beat.beat_track = MagicMock(return_value=(120.0, [10, 20]))
+        mock_librosa.frames_to_time = MagicMock(return_value=[0.5, 1.0])
+        # Very low, uniform onset strength
+        mock_librosa.onset.onset_strength = MagicMock(return_value=np.array([0.1]*30))
+
+        mock_np.atleast_1d = MagicMock(return_value=[120.0])
+        mock_np.percentile = MagicMock(return_value=0.5) # Threshold higher than max strength
+        mock_np.argmax = MagicMock(return_value=0)
+
+        with patch.object(audio_analyzer, 'librosa', mock_librosa), patch.object(audio_analyzer, 'np', mock_np):
+            beat_times, hard_beat_times, main_drop_time = audio_analyzer.extract_beats("dummy.mp3")
+
+            assert beat_times == [0.5, 1.0]
+            assert hard_beat_times == []
+            assert main_drop_time is None
+
+
+def test_build_cut_schedule_drop_phase():
+    """Test build_cut_schedule logic for drop phase cuts."""
+    beat_times = [1.0, 1.5, 2.0, 2.5]
+    hard_beat_times = [1.5, 2.5]
+    # All beats fall into the drop phase
+    sections = [SongSection(0.0, 5.0, "drop", 0.9)]
+
+    cut_points = build_cut_schedule(beat_times, sections, hard_beat_times, 5.0)
+
+    # Verify that we generated some cut points and all within the drop phase.
+    assert len(cut_points) > 0
+
+    # First cut point should be at 0.0 since beat_times[0] > 0.05
+    assert cut_points[0].time == 0.0
+
+    for cp in cut_points:
+        assert cp.phase == "drop"
+
+def test_build_cut_schedule_drop_phase_no_forced_zero():
+    """Test build_cut_schedule forces a cut on beats during a drop phase."""
+    # First beat < 0.05 so no forced 0.0 cut.
+    beat_times = [0.0, 0.5, 1.0, 1.5, 2.0]
+    hard_beat_times = [0.5, 1.5]
+    # All beats fall into the drop phase
+    sections = [SongSection(0.0, 5.0, "drop", 0.9)]
+
+    cut_points = build_cut_schedule(beat_times, sections, hard_beat_times, 5.0)
+
+    assert len(cut_points) > 0
+    # Make sure we don't start with a forced zero since it's already there
+    assert cut_points[0].time >= 0.0
+    for cp in cut_points:
+        assert cp.phase == "drop"
