@@ -1198,6 +1198,7 @@ def create_tiktok_edit(
     # ── Videos laden & croppen ──────────────────────────────────────────────
     print()
     _focus_mode = reframe_focus_mode if auto_reframe else "center"
+    videos = {vp: _prepare_video(vp, focus_mode=_focus_mode) for vp in tqdm(video_paths, desc="Lade & crop Videos", unit="Video")}
     videos = {}
     for vp in tqdm(video_paths, desc="Lade & crop Videos", unit="Video"):
         videos[vp] = _prepare_video(vp, focus_mode=_focus_mode)
