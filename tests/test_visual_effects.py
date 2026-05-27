@@ -151,6 +151,7 @@ def test_make_watermark_overlay_invalid_clip():
             raise AttributeError("Invalid size")
 
     clip = InvalidClip()
+    result = visual_effects.make_watermark_overlay(clip, "watermark")
     result = visual_effects.make_watermark_overlay(clip, "TEST")
     assert result == clip
 
@@ -165,6 +166,10 @@ def test_make_split_screen_glitch_invalid_clip():
     result = visual_effects.make_split_screen_glitch(clip)
     assert result == clip
 
+def test_make_text_mask_sequence_empty_words():
+    """Test make_text_mask_sequence with empty words list."""
+    clip = MagicMock()
+    result = visual_effects.make_text_mask_sequence(clip, words=[])
 def test_make_blend_text_overlay_invalid_clip():
     """Test that make_blend_text_overlay handles exceptions correctly."""
     class InvalidClip:
