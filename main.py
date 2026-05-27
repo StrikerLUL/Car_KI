@@ -3,11 +3,14 @@ import os
 import sys
 import argparse
 import shutil
+import logging
 from audio_analyzer import build_cut_schedule
 from video_editor import create_tiktok_edit, load_edit_template, save_edit_template
 from analysis_cache import get_audio_analysis_cached, get_highlights_cached
 from pipeline_config import PipelineConfig
 
+
+logging.basicConfig(level=logging.INFO, format='%(levelname)s [%(filename)s:%(lineno)d] %(message)s')
 
 def _parse_args():
     parser = argparse.ArgumentParser(
@@ -85,7 +88,7 @@ def _clear_cache_if_requested(clear_cache: bool) -> None:
         shutil.rmtree(cache_dir)
         print("  [CACHE] .cache wurde erfolgreich geloescht.")
     except Exception as e:
-        print(f"  [CACHE] Konnte .cache nicht loeschen: {e}")
+        logging.error(f"  [CACHE] Konnte .cache nicht loeschen: {e}")
         sys.exit(1)
 
 
@@ -127,7 +130,7 @@ def run_pipeline(config: PipelineConfig, preview: bool = False, no_cache: bool =
     try:
         config.validate()
     except (ValueError, FileNotFoundError) as e:
-        print(f"Fehler bei der Konfigurationsvalidierung: {e}")
+        logging.error(f"Fehler bei der Konfigurationsvalidierung: {e}")
         sys.exit(1)
 
     if no_cache:
@@ -241,7 +244,20 @@ def run_pipeline(config: PipelineConfig, preview: bool = False, no_cache: bool =
 
 
 def main():
+    logging.basicConfig(level=logging.INFO, format='%(levelname)s [%(filename)s:%(lineno)d] %(message)s')
+
     args = _parse_args()
+
+    # ── Config-Validierung beim Start ────────────────────────────────────────
+    if args.template and not os.path.exists(args.template):
+        logging.error(f"Fehler: Template-Datei '{args.template}' nicht gefunden.")
+        sys.exit(1)
+
+    if args.save_template:
+        save_dir = os.path.dirname(args.save_template)
+        if save_dir and not os.path.exists(save_dir):
+            logging.error(f"Fehler: Verzeichnis für --save-template '{save_dir}' existiert nicht.")
+            sys.exit(1)
 
     if args.gui:
         try:
@@ -249,7 +265,7 @@ def main():
             run_gui()
             return
         except ImportError:
-            print("Fehler: gui.py nicht gefunden oder tkinter fehlt.")
+            logging.error("Fehler: gui.py nicht gefunden oder tkinter fehlt.")
             sys.exit(1)
 
     if args.no_cache:
@@ -276,7 +292,7 @@ def main():
     print()
     audio_path = input("Pfad zur Musik (MP3/WAV): ").strip().strip('"\'')
     if not os.path.exists(audio_path):
-        print(f"Fehler: Audiodatei '{audio_path}' nicht gefunden.")
+        logging.error(f"Fehler: Audiodatei '{audio_path}' nicht gefunden.")
         sys.exit(1)
 
     # ── Output ───────────────────────────────────────────────────────────────
@@ -416,13 +432,13 @@ def main():
     template_overrides = None
     if args.template:
         if not os.path.exists(args.template):
-            print(f"Fehler: Template-Datei '{args.template}' nicht gefunden.")
+            logging.error(f"Fehler: Template-Datei '{args.template}' nicht gefunden.")
             sys.exit(1)
         try:
             template_overrides = load_edit_template(args.template)
             print(f"  ✓ Template geladen: {args.template}")
         except Exception as e:
-            print(f"Fehler: Template konnte nicht geladen werden: {e}")
+            logging.error(f"Fehler: Template konnte nicht geladen werden: {e}")
             sys.exit(1)
 
     if args.save_template:
@@ -454,7 +470,7 @@ def main():
             save_edit_template(args.save_template, save_payload)
             print(f"  ✓ Template gespeichert: {args.save_template}")
         except Exception as e:
-            print(f"Fehler: Template konnte nicht gespeichert werden: {e}")
+            logging.error(f"Fehler: Template konnte nicht gespeichert werden: {e}")
             sys.exit(1)
 
     run_pipeline(config, preview=args.preview, no_cache=args.no_cache)
