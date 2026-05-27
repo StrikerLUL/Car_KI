@@ -1193,7 +1193,7 @@ def create_tiktok_edit(
     # ── Videos laden & croppen ──────────────────────────────────────────────
     print("\nLade & crop Videos...")
     _focus_mode = reframe_focus_mode if auto_reframe else "center"
-    videos = {vp: _prepare_video(vp, focus_mode=_focus_mode) for vp in video_paths}
+    videos = {vp: _prepare_video(vp, focus_mode=_focus_mode) for vp in tqdm(video_paths, desc="Lade & crop Videos", unit="Video")}
 
     # ── Audio-Effekte: Gain-Staging + Volume-Dip ─────────────────────────────
     import librosa
