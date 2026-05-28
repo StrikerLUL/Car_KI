@@ -209,10 +209,14 @@ def test_make_watermark_overlay_invalid_clip():
     result = visual_effects.make_blend_text_overlay(clip, "TEST")
     assert result == clip
 
-def test_make_watermark_overlay_invalid_clip():
+def test_make_watermark_overlay_invalid_clip_2():
     """Test make_watermark_overlay with an invalid clip that raises an exception."""
+    class InvalidClip:
+        @property
+        def size(self):
+            raise AttributeError("Invalid size")
+    clip = InvalidClip()
     result = visual_effects.make_watermark_overlay(clip, "watermark")
-    result = visual_effects.make_watermark_overlay(clip, "TEST")
     assert result == clip
 
 def test_make_split_screen_glitch_invalid_clip():

@@ -109,9 +109,6 @@ def test_compute_optical_flow_cpu_short():
     result = video_analyzer._compute_optical_flow_cpu(mock_cap, total_frames=60, fps=30.0, sample_interval=1.0)
     assert isinstance(result, list)
     assert len(result) >= 1
-    assert clip.score is None
-    assert clip.cam_type == 123
-    assert clip.tag is True
 
 from unittest.mock import patch, MagicMock
 

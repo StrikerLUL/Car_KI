@@ -56,5 +56,23 @@ class PipelineConfig:
         if not (0.0 <= self.watermark_opacity <= 1.0):
             raise ValueError(f"watermark_opacity muss zwischen 0.0 und 1.0 liegen, ist aber {self.watermark_opacity}.")
 
+        valid_presets = {"teal_orange", "cinematic", "neutral"}
+        if self.grade_preset not in valid_presets:
+            raise ValueError(f"grade_preset '{self.grade_preset}' ist ungültig. Erlaubt: {valid_presets}")
+
+        if self.visualizer_bars <= 0:
+            raise ValueError(f"visualizer_bars muss positiv sein, ist aber {self.visualizer_bars}.")
+
+        valid_modes = {"quick", "pro"}
+        if self.editing_mode not in valid_modes:
+            raise ValueError(f"editing_mode '{self.editing_mode}' ist ungültig. Erlaubt: {valid_modes}")
+
+        valid_trends = {"storytime", "motivation", "fast_meme_cut", None}
+        if self.trend_preset not in valid_trends:
+            raise ValueError(f"trend_preset '{self.trend_preset}' ist ungültig. Erlaubt: {valid_trends}")
+
+        if self.template_path and not os.path.exists(self.template_path):
+            raise FileNotFoundError(f"template_path Datei nicht gefunden: {self.template_path}")
+
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
