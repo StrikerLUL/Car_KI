@@ -1454,7 +1454,6 @@ def create_tiktok_edit(
 
     _pending_overlap = None
 
-    for sched_idx, cp in tqdm(enumerate(schedule_iter), total=len(schedule_iter), desc="Videoclips verarbeiten"):
     for sched_idx, cp in enumerate(tqdm(schedule_iter, desc="Generiere Clips", unit="Clip")):
         beat          = cp.time
         clip_duration = cp.clip_dur_hint
@@ -1754,10 +1753,6 @@ def create_tiktok_edit(
                     final_clips.append(video.subclip(start_t, start_t + leftover))
                 except Exception as e:
                     logging.error(f"Letzter Clip: {e}")
-
-    if not final_clips:
-        logging.error("Konnte keine Clips erstellen.")
-                    logging.error(f"  ✗ Letzter Clip: {e}")
 
     if not final_clips:
         logging.error("Fehler: Konnte keine Clips erstellen.")

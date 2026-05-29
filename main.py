@@ -250,15 +250,34 @@ def main():
     args = _parse_args()
 
     # ── Config-Validierung beim Start ────────────────────────────────────────
-    if args.template and not os.path.exists(args.template):
-        logging.error(f"Fehler: Template-Datei '{args.template}' nicht gefunden.")
-        sys.exit(1)
+    if args.template:
+        if not os.path.exists(args.template):
+            logging.error(f"Fehler: Template-Datei '{args.template}' nicht gefunden.")
+            sys.exit(1)
+        try:
+            template_data = load_edit_template(args.template)
+            if "grade_preset" in template_data and template_data["grade_preset"] not in {"teal_orange", "cinematic", "neutral"}:
+                logging.error(f"Fehler in Template: Ungültiges grade_preset '{template_data['grade_preset']}'")
+                sys.exit(1)
+            if "visualizer_bars" in template_data and template_data["visualizer_bars"] <= 0:
+                logging.error(f"Fehler in Template: visualizer_bars muss positiv sein.")
+                sys.exit(1)
+            if "watermark_opacity" in template_data and not (0.0 <= template_data["watermark_opacity"] <= 1.0):
+                logging.error(f"Fehler in Template: watermark_opacity muss zwischen 0.0 und 1.0 liegen.")
+                sys.exit(1)
+        except Exception as e:
+            logging.error(f"Fehler beim Parsen der Template-Datei: {e}")
+            sys.exit(1)
 
     if args.save_template:
         save_dir = os.path.dirname(args.save_template)
         if save_dir and not os.path.exists(save_dir):
             logging.error(f"Fehler: Verzeichnis für --save-template '{save_dir}' existiert nicht.")
             sys.exit(1)
+
+    if not (0.0 <= args.watermark_opacity <= 1.0):
+        logging.error(f"Fehler: --watermark-opacity muss zwischen 0.0 und 1.0 liegen, ist aber {args.watermark_opacity}.")
+        sys.exit(1)
 
     if args.gui:
         try:
