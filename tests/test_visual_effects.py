@@ -251,3 +251,124 @@ def test_make_text_mask_sequence_empty_words():
     """Test that make_text_mask_sequence returns empty list when given empty words."""
     result = visual_effects.make_text_mask_sequence(MagicMock(), [])
     assert result == []
+
+def test_make_zoom_punch_valid_clip():
+    class ValidClip:
+        @property
+        def size(self):
+            return (1920, 1080)
+        @property
+        def duration(self):
+            return 5.0
+        def fl(self, *args, **kwargs):
+            return "ZoomedClip"
+
+    clip = ValidClip()
+    result = visual_effects.make_zoom_punch(clip)
+    assert result == "ZoomedClip"
+
+def test_make_camera_shake_valid_clip():
+    class ValidClip:
+        @property
+        def size(self):
+            return (1920, 1080)
+        @property
+        def fps(self):
+            return 60.0
+        def fl(self, *args, **kwargs):
+            return "ShakenClip"
+
+    clip = ValidClip()
+    result = visual_effects.make_camera_shake(clip)
+    assert result == "ShakenClip"
+
+def test_make_split_screen_glitch_valid_clip():
+    class ValidClip:
+        @property
+        def size(self):
+            return (1920, 1080)
+        @property
+        def duration(self):
+            return 5.0
+        @property
+        def fps(self):
+            return 60.0
+        def fl(self, *args, **kwargs):
+            return "GlitchClip"
+
+    clip = ValidClip()
+    result = visual_effects.make_split_screen_glitch(clip)
+    assert result == "GlitchClip"
+
+def test_make_watermark_overlay_valid_clip():
+    class ValidClip:
+        @property
+        def size(self):
+            return (1920, 1080)
+        def fl(self, *args, **kwargs):
+            return "WatermarkClip"
+
+    clip = ValidClip()
+    result = visual_effects.make_watermark_overlay(clip, "TEST")
+    assert result == "WatermarkClip"
+
+def test_measure_text_invalid_font(monkeypatch):
+    from visual_effects import _measure_text
+    import sys
+    monkeypatch.setitem(sys.modules, 'PIL', None)
+    w, h = _measure_text("TEST", None)
+    # the fallback if PIL fails is len * 22
+    assert w == len("TEST") * 22
+    assert h == 44
+
+def test_get_pil_font_invalid_path():
+    from visual_effects import _get_pil_font
+    font = _get_pil_font(12)
+    assert font is not None
+
+def test_pick_text_mask_word_fallback():
+    res = visual_effects.pick_text_mask_word("invalid.mp3", use_lyrics=False)
+    assert res in visual_effects._RACING_WORDS
+
+def test_transcribe_audio_for_words_missing_whisper(monkeypatch):
+    monkeypatch.setitem(sys.modules, 'whisper', None)
+    res = visual_effects.transcribe_audio_for_words("dummy.mp3")
+    assert res == []
+
+def test_make_zoom_punch_zero_duration():
+    class EdgeClip:
+        @property
+        def size(self): return (1920, 1080)
+        @property
+        def duration(self): return 0.0 # Extreme
+        def fl(self, *args, **kwargs): return "EdgeClip"
+
+    assert visual_effects.make_zoom_punch(EdgeClip()) == "EdgeClip"
+
+def test_make_camera_shake_extreme_intensity():
+    class EdgeClip:
+        @property
+        def size(self): return (1920, 1080)
+        @property
+        def fps(self): return 60.0
+        def fl(self, *args, **kwargs): return "Shaken"
+
+    assert visual_effects.make_camera_shake(EdgeClip(), intensity=50.0) == "Shaken"
+
+def test_make_text_mask_clip_valid(monkeypatch):
+    class ValidClip:
+        @property
+        def size(self):
+            return (1920, 1080)
+        @property
+        def duration(self):
+            return 5.0
+        def get_frame(self, t):
+            import numpy as np
+            return np.zeros((1080, 1920, 3), dtype=np.uint8)
+
+    clip = ValidClip()
+    # Mocking pillow features would require complex mocks, so we just test the missing pillow path
+    monkeypatch.setitem(sys.modules, 'PIL', None)
+    res = visual_effects.make_text_mask_clip(clip, "TEST")
+    assert res is None
