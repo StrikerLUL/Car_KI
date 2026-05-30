@@ -44,11 +44,34 @@ from audio_effects import (
     extract_spectrum_frames,
     save_processed_audio,
 )
+from proglog import ProgressBarLogger
+
+class TqdmProgressBarLogger(ProgressBarLogger):
+    def __init__(self, init_state=None, bars=None, ignored_bars=None, logged_bars='all', min_time_interval=0, ignore_bars_under=0):
+        super().__init__(init_state, bars, ignored_bars, logged_bars, min_time_interval, ignore_bars_under)
+        self.tqdm_bars = {}
+
+    def bars_callback(self, bar, attr, value, old_value=None):
+        if bar not in self.tqdm_bars:
+            total = self.bars[bar].get('total')
+            if total is not None:
+                self.tqdm_bars[bar] = tqdm(total=total, desc=bar, leave=False)
+
+        if attr == 'index' and bar in self.tqdm_bars:
+            self.tqdm_bars[bar].n = value
+            self.tqdm_bars[bar].refresh()
+            if value == self.bars[bar].get('total'):
+                self.tqdm_bars[bar].close()
+                del self.tqdm_bars[bar]
+
 def _write_videofile_with_retry(video_clip, max_retries=3, delay_sec=5.0, **kwargs):
     """
     Führt video_clip.write_videofile() aus. Schlägt der Aufruf fehl (z.B. durch
     einen ffmpeg-Crash, out-of-memory etc.), wird nach kurzer Pause erneut probiert.
     """
+    if kwargs.get("logger", "bar") == "bar":
+        kwargs["logger"] = TqdmProgressBarLogger()
+
     last_exception = None
     for attempt in range(1, max_retries + 1):
         try:
@@ -56,9 +79,7 @@ def _write_videofile_with_retry(video_clip, max_retries=3, delay_sec=5.0, **kwar
             return True
         except Exception as e:
             last_exception = e
-            logging.warning(f"  ⚠ FFMPEG-Export Fehler (Versuch {attempt}/{max_retries}): {e}")
             logging.error(f"FFMPEG-Export Fehler (Versuch {attempt}/{max_retries}): {e}")
-            logging.error(f"  ⚠ FFMPEG-Export Fehler (Versuch {attempt}/{max_retries}): {e}")
             if attempt < max_retries:
                 logging.info(f"Warte {delay_sec} Sekunden vor dem nächsten Versuch...")
                 time.sleep(delay_sec)
@@ -1198,7 +1219,6 @@ def create_tiktok_edit(
     # ── Videos laden & croppen ──────────────────────────────────────────────
     print()
     _focus_mode = reframe_focus_mode if auto_reframe else "center"
-    videos = {vp: _prepare_video(vp, focus_mode=_focus_mode) for vp in tqdm(video_paths, desc="Lade & crop Videos", unit="Video")}
     videos = {}
     for vp in tqdm(video_paths, desc="Lade & crop Videos", unit="Video"):
         videos[vp] = _prepare_video(vp, focus_mode=_focus_mode)
