@@ -32,6 +32,8 @@ import numpy as np
 import cv2
 import logging
 from tqdm import tqdm
+from proglog import ProgressBarLogger
+
 from itertools import groupby
 from moviepy.editor import VideoFileClip, AudioFileClip, concatenate_videoclips
 from typing import Callable, List, Dict, Optional, Tuple, Any
@@ -44,6 +46,27 @@ from audio_effects import (
     extract_spectrum_frames,
     save_processed_audio,
 )
+
+class TqdmProgressBarLogger(ProgressBarLogger):
+    def __init__(self):
+        super().__init__()
+        self.tqdm_bars = {}
+
+    def bars_callback(self, bar, attr, value, old_value=None):
+        if attr == 'total':
+            if bar not in self.tqdm_bars:
+                self.tqdm_bars[bar] = tqdm(total=value, desc=bar)
+            else:
+                self.tqdm_bars[bar].total = value
+        elif attr == 'index':
+            if bar in self.tqdm_bars:
+                self.tqdm_bars[bar].n = value
+                self.tqdm_bars[bar].refresh()
+
+    def close(self):
+        for b in self.tqdm_bars.values():
+            b.close()
+
 def _write_videofile_with_retry(video_clip, max_retries=3, delay_sec=5.0, **kwargs):
     """
     Führt video_clip.write_videofile() aus. Schlägt der Aufruf fehl (z.B. durch
@@ -1843,22 +1866,28 @@ def create_tiktok_edit(
         ]
 
     try:
+        tqdm_logger = TqdmProgressBarLogger()
         _write_videofile_with_retry(
             final_video, max_retries=3, delay_sec=3.0,
             filename=output_path, fps=export_fps, codec="h264_nvenc",
             audio_codec="aac", audio_bitrate="192k" if preview else "320k",
-            preset="p1" if preview else "p4", threads=_n_threads, ffmpeg_params=nvenc_params, logger="bar"
+            preset="p1" if preview else "p4", threads=_n_threads, ffmpeg_params=nvenc_params, logger=tqdm_logger
         )
+        tqdm_logger.close()
         print("  ✓ NVENC GPU-Export erfolgreich (1080×1920, 60 FPS, CQ14)")
     except Exception as e:
+        if 'tqdm_logger' in locals():
+            tqdm_logger.close()
         logging.warning(f"\nNVENC fehlgeschlagen oder nicht verfügbar nach Retries: {e}\nFallback → CPU (libx264)...")
+        tqdm_logger_cpu = TqdmProgressBarLogger()
         _write_videofile_with_retry(
             final_video, max_retries=3, delay_sec=3.0,
             filename=output_path, fps=export_fps, codec="libx264",
             audio_codec="aac", audio_bitrate="192k" if preview else "320k",
             preset="ultrafast" if preview else "medium", threads=_n_threads,
-            ffmpeg_params=x264_params, logger="bar"
+            ffmpeg_params=x264_params, logger=tqdm_logger_cpu
         )
+        tqdm_logger_cpu.close()
         print("  ✓ CPU-Export erfolgreich (1080×1920, 60 FPS, CRF14)")
 
     # ── Ressourcen freigeben ─────────────────────────────────────────────────
