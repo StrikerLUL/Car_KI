@@ -249,3 +249,43 @@ def test_run_yolo_batch_exception():
 
     result = video_analyzer._run_yolo_batch(mock_model, frames, [2, 3])
     assert result == [0.0]
+
+
+def test_find_highlights_invalid_file():
+    """Test find_highlights with a non-existent file."""
+    clips = video_analyzer.find_highlights("non_existent_file_12345.mp4", num_clips=5)
+    assert len(clips) == 1
+    assert clips[0].timestamp == 0.0
+    assert clips[0].source == "non_existent_file_12345.mp4"
+
+def test_find_highlights_zero_clips(tmp_path):
+    """Test find_highlights with num_clips=0. Should not raise error and handle gracefully."""
+    # Create a dummy video file
+    dummy_video = tmp_path / "dummy.mp4"
+    dummy_video.write_bytes(b"dummy data")
+
+    # Mocking cap to act like a valid but very short video to avoid actual cv2 processing
+    from unittest.mock import MagicMock
+    mock_cap = MagicMock()
+    mock_cap.get.side_effect = lambda prop: 30.0 if prop == video_analyzer.cv2.CAP_PROP_FPS else (10 if prop == video_analyzer.cv2.CAP_PROP_FRAME_COUNT else 0)
+    mock_cap.read.return_value = (True, video_analyzer.np.zeros((100, 100, 3)))
+    mock_cap.isOpened.return_value = True
+
+    original_cap = video_analyzer.cv2.VideoCapture
+    video_analyzer.cv2.VideoCapture = lambda x: mock_cap
+    try:
+        clips = video_analyzer.find_highlights(str(dummy_video), num_clips=0)
+        assert len(clips) == 1
+        assert clips[0].timestamp == 0.0
+    finally:
+        video_analyzer.cv2.VideoCapture = original_cap
+
+def test_find_highlights_invalid_format(tmp_path):
+    """Test find_highlights with a non-video text file."""
+    text_file = tmp_path / "invalid.txt"
+    text_file.write_text("This is not a video file.")
+
+    clips = video_analyzer.find_highlights(str(text_file), num_clips=5)
+    assert len(clips) == 1
+    assert clips[0].timestamp == 0.0
+    assert clips[0].source == str(text_file)
