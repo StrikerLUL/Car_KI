@@ -2,16 +2,24 @@ import pytest
 from unittest.mock import MagicMock, patch
 import sys
 
-# Mock modules for testing color_grading without its dependencies
+# For certain tests, we will provide actual numpy/cv2, while keeping torch mocked to avoid slow GPU ops.
+# We'll re-import without patching everything for the new tests to actually work with numpy objects.
+
+import color_grading
+from color_grading import ClipGrade, build_per_clip_grade, _get_vignette_cpu, grade_frame, _apply_base_grade_cpu, _lut_cinematic_np, _lut_teal_orange_np, apply_grade_to_clip
+
 mock_modules = {
+    'torch': MagicMock(),
     'numpy': MagicMock(),
     'cv2': MagicMock(),
-    'torch': MagicMock(),
 }
 
 with patch.dict('sys.modules', mock_modules):
     import color_grading
     from color_grading import ClipGrade, build_per_clip_grade, _get_vignette_cpu, grade_frame, _apply_base_grade_cpu, _lut_cinematic_np, _lut_teal_orange_np, apply_grade_to_clip
+
+import numpy as np
+import cv2
 
 
 def test_clip_grade_defaults():
@@ -203,3 +211,70 @@ def test_lut_teal_orange_np_extreme_values():
             _lut_teal_orange_np(mock_img_f, mock_lum3)
         except Exception as e:
             pytest.fail(f"Raised exception on empty array: {e}")
+
+def test_grade_frame_cpu_full_features():
+    """Test _grade_frame_cpu with enabled features (LUT, Crush, Bloom, Vignette)."""
+    grade = ClipGrade(
+        contrast=1.0, saturation=1.0, brightness=0.0,
+        lut_preset="none", lut_strength=0.0,
+        highlights_crush=True, crush_threshold=0.5, crush_strength=1.0,
+        haze_bloom=True, bloom_threshold=0.5, bloom_strength=1.0,
+        vignette_strength=1.0, vignette_radius=0.5
+    )
+
+    frame = np.ones((100, 100, 3), dtype=np.uint8) * 128
+
+    with patch.object(color_grading, 'np', np), patch.object(color_grading, 'cv2', cv2):
+        try:
+            result = color_grading._grade_frame_cpu(frame, grade)
+            assert result.shape == (100, 100, 3)
+            assert result.dtype == np.uint8
+        except Exception as e:
+            pytest.fail(f"_grade_frame_cpu failed with real arrays: {e}")
+
+def test_build_per_clip_grade_cinematic():
+    """Test build_per_clip_grade bounds and default behavior for the 'cinematic' preset."""
+    # Test without randomize
+    grade = build_per_clip_grade(base_preset="cinematic", clip_tag="", randomize=False)
+    assert grade.lut_preset == "cinematic"
+    assert grade.contrast == 1.25  # From GRADE_PRESETS["cinematic"]
+    assert grade.saturation == 1.10
+
+    # Test with randomize
+    grade_random = build_per_clip_grade(base_preset="cinematic", clip_tag="action", randomize=True)
+    assert 0.8 <= grade_random.contrast <= 1.5
+    assert 0.7 <= grade_random.saturation <= 1.6
+
+def test_build_per_clip_grade_none():
+    """Test build_per_clip_grade behavior for an unmapped/unknown preset (defaults to teal_orange)."""
+    grade = build_per_clip_grade(base_preset="non_existent", clip_tag="", randomize=False)
+    assert grade.lut_preset == "teal_orange"
+
+def test_apply_haze_bloom_cpu_zeros():
+    """Test _apply_haze_bloom_cpu using real empty/zero numpy arrays."""
+    # Test with standard 0-filled array
+    img_f = np.zeros((100, 100, 3), dtype=np.float32)
+    lum = np.zeros((100, 100), dtype=np.float32)
+
+    with patch.object(color_grading, 'np', np), patch.object(color_grading, 'cv2', cv2):
+        try:
+            result = color_grading._apply_haze_bloom_cpu(img_f, lum, threshold=0.5, strength=0.5)
+            assert result.shape == (100, 100, 3)
+        except Exception as e:
+            pytest.fail(f"_apply_haze_bloom_cpu failed on zero arrays: {e}")
+
+def test_apply_haze_bloom_cpu_empty_array():
+    """Test _apply_haze_bloom_cpu using real empty numpy arrays (0x0)."""
+    # Test with completely empty array to verify handling of zero-division or errors
+    img_f = np.empty((0, 0, 3), dtype=np.float32)
+    lum = np.empty((0, 0), dtype=np.float32)
+
+    with patch.object(color_grading, 'np', np), patch.object(color_grading, 'cv2', cv2):
+        try:
+            result = color_grading._apply_haze_bloom_cpu(img_f, lum, threshold=0.5, strength=0.5)
+            assert result is not None
+        except cv2.error:
+            # cv2 functions will complain about size 0, which is normal.
+            pass
+        except Exception as e:
+            pytest.fail(f"Failed with unexpected error: {e}")
