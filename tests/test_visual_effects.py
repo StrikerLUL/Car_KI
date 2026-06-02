@@ -372,3 +372,159 @@ def test_make_text_mask_clip_valid(monkeypatch):
     monkeypatch.setitem(sys.modules, 'PIL', None)
     res = visual_effects.make_text_mask_clip(clip, "TEST")
     assert res is None
+
+def test_make_pip_overlay_valid_clip(monkeypatch):
+    """Test make_pip_overlay with valid input."""
+    class ValidClip:
+        @property
+        def size(self):
+            return (1920, 1080)
+        def fl(self, *args, **kwargs):
+            return self
+        def resize(self, *args, **kwargs):
+            return self
+        def set_position(self, *args, **kwargs):
+            return self
+        def set_duration(self, *args, **kwargs):
+            return self
+        @property
+        def duration(self):
+            return 5.0
+
+    class CompositeMock:
+        def __init__(self, clips, **kwargs):
+            self.clips = clips
+            self.result = "CompositeResult"
+
+    import sys
+    class MockEditor:
+        CompositeVideoClip = CompositeMock
+
+    monkeypatch.setitem(sys.modules, 'moviepy.editor', MockEditor)
+
+    base_clip = ValidClip()
+    pip_clip = ValidClip()
+    result = visual_effects.make_pip_overlay(base_clip, pip_clip)
+    assert result.result == "CompositeResult"
+
+def test_apply_letterbox_valid_clip():
+    """Test apply_letterbox with valid input."""
+    class ValidClip:
+        @property
+        def size(self):
+            return (1920, 1080)
+        def fl(self, *args, **kwargs):
+            return "LetterboxClip"
+
+    clip = ValidClip()
+    result = visual_effects.apply_letterbox(clip, bar_fraction=0.1)
+    assert result == "LetterboxClip"
+
+def test_apply_letterbox_zero_fraction():
+    """Test apply_letterbox with bar_fraction=0.0."""
+    class ValidClip:
+        @property
+        def size(self):
+            return (1920, 1080)
+        def fl(self, *args, **kwargs):
+            return "ZeroFractionClip"
+
+    clip = ValidClip()
+    result = visual_effects.apply_letterbox(clip, bar_fraction=0.0)
+    assert result == "ZeroFractionClip"
+
+def test_make_mirror_x_valid_clip():
+    """Test make_mirror_x with valid input."""
+    class ValidClip:
+        @property
+        def size(self):
+            return (1920, 1080)
+        def fl(self, *args, **kwargs):
+            return "MirrorXClip"
+
+    clip = ValidClip()
+    result = visual_effects.make_mirror_x(clip)
+    assert result == "MirrorXClip"
+
+def test_make_text_mask_clip_empty_text():
+    """Test make_text_mask_clip with empty string text."""
+    from unittest.mock import MagicMock
+    clip = MagicMock()
+    result = visual_effects.make_text_mask_clip(clip, text="")
+    assert result is None
+
+def test_make_pip_overlay_edge_cases(monkeypatch):
+    """Test make_pip_overlay with zero size fraction and unknown position string."""
+    class ValidClip:
+        @property
+        def size(self):
+            return (1920, 1080)
+        def fl(self, *args, **kwargs):
+            return self
+        def resize(self, *args, **kwargs):
+            return self
+        def set_position(self, *args, **kwargs):
+            return self
+        def set_duration(self, *args, **kwargs):
+            return self
+        @property
+        def duration(self):
+            return 5.0
+
+    class CompositeMock:
+        def __init__(self, clips, **kwargs):
+            self.clips = clips
+            self.result = "CompositeResult"
+
+    import sys
+    class MockEditor:
+        CompositeVideoClip = CompositeMock
+
+    monkeypatch.setitem(sys.modules, 'moviepy.editor', MockEditor)
+
+    base_clip = ValidClip()
+    pip_clip = ValidClip()
+
+    # Position fallback test
+    result1 = visual_effects.make_pip_overlay(base_clip, pip_clip, position="invalid_position_string")
+    assert result1.result == "CompositeResult"
+
+    # Edge size fraction
+    result2 = visual_effects.make_pip_overlay(base_clip, pip_clip, size_frac=-0.5)
+    assert result2.result == "CompositeResult"
+
+def test_apply_letterbox_invalid_fraction():
+    """Test apply_letterbox with negative or extremely large bar_fraction."""
+    import numpy as np
+
+    class EdgeClip:
+        @property
+        def size(self):
+            return (1920, 1080)
+        def fl(self, func, *args, **kwargs):
+            # Just test if the inner function crashes on edge cases
+            def get_frame(t):
+                return np.ones((1080, 1920, 3), dtype=np.uint8) * 255
+            try:
+                func(get_frame, 0.0)
+            except Exception as e:
+                return e
+            return self
+
+    clip = EdgeClip()
+
+    # Too large bar fraction
+    result1 = visual_effects.apply_letterbox(clip, bar_fraction=5.0)
+    assert not isinstance(result1, Exception), f"Large fraction crashed: {result1}"
+
+    # Negative bar fraction
+    result2 = visual_effects.apply_letterbox(clip, bar_fraction=-0.5)
+    assert not isinstance(result2, Exception), f"Negative fraction crashed: {result2}"
+
+def test_make_text_mask_sequence_none_words():
+    """Test make_text_mask_sequence with unexpected None type for words."""
+    from unittest.mock import MagicMock
+    import pytest
+    clip = MagicMock()
+    with pytest.raises(TypeError):
+        visual_effects.make_text_mask_sequence(clip, words=None)
