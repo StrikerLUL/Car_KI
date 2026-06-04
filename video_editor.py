@@ -87,6 +87,32 @@ def _write_videofile_with_retry(video_clip, max_retries=3, delay_sec=5.0, **kwar
     # Wenn alle Versuche fehlgeschlagen sind
     raise last_exception
 
+def _open_video_with_retry(video_path: str, max_retries=3, delay_sec=2.0) -> VideoFileClip:
+    """Lädt ein VideoFileClip mit Retry-Logik für ffmpeg-Parsing Fehler."""
+    last_exception = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            return VideoFileClip(video_path)
+        except Exception as e:
+            last_exception = e
+            logging.error(f"FFMPEG-Import Fehler bei Video (Versuch {attempt}/{max_retries}): {e}")
+            if attempt < max_retries:
+                time.sleep(delay_sec)
+    raise last_exception
+
+def _open_audio_with_retry(audio_path: str, max_retries=3, delay_sec=2.0) -> AudioFileClip:
+    """Lädt ein AudioFileClip mit Retry-Logik für ffmpeg-Parsing Fehler."""
+    last_exception = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            return AudioFileClip(audio_path)
+        except Exception as e:
+            last_exception = e
+            logging.error(f"FFMPEG-Import Fehler bei Audio (Versuch {attempt}/{max_retries}): {e}")
+            if attempt < max_retries:
+                time.sleep(delay_sec)
+    raise last_exception
+
 from color_grading import (
     ClipGrade,
     apply_grade_to_clip,
@@ -593,7 +619,7 @@ def _estimate_retention_heatmap(schedule_iter: List[CutPoint],
 
 
 def _prepare_video(video_path: str, focus_mode: str = "center") -> VideoFileClip:
-    video = VideoFileClip(video_path)
+    video = _open_video_with_retry(video_path)
     w, h = video.size
 
     # ── Schritt 1: Auf 9:16 croppen (vertikal zentriert) ─────────────────────
@@ -1324,7 +1350,7 @@ def create_tiktok_edit(
 
 
     # ── Audio laden ─────────────────────────────────────────────────────────
-    audio = AudioFileClip(processed_audio_path)
+    audio = _open_audio_with_retry(processed_audio_path)
     audio_duration = audio.duration
     beat_times = [b for b in beat_times if b <= audio_duration]
 
