@@ -278,3 +278,158 @@ def test_apply_haze_bloom_cpu_empty_array():
             pass
         except Exception as e:
             pytest.fail(f"Failed with unexpected error: {e}")
+
+def test_grade_frame_cpu_with_lut():
+    """Test _grade_frame_cpu with active LUT."""
+    grade = ClipGrade(
+        contrast=1.0, saturation=1.0, brightness=0.0,
+        lut_preset="cinematic", lut_strength=1.0,
+        highlights_crush=False, haze_bloom=False, vignette_strength=0.0
+    )
+    frame = np.ones((100, 100, 3), dtype=np.uint8) * 128
+
+    with patch.object(color_grading, 'np', np), patch.object(color_grading, 'cv2', cv2):
+        try:
+            result = color_grading._grade_frame_cpu(frame, grade)
+            assert result.shape == (100, 100, 3)
+            assert result.dtype == np.uint8
+        except Exception as e:
+            pytest.fail(f"_grade_frame_cpu with LUT failed: {e}")
+
+def test_make_grade_filter_execution():
+    """Test execution of make_grade_filter returned function."""
+    grade = ClipGrade()
+    filter_func = color_grading.make_grade_filter(grade)
+    frame = np.ones((10, 10, 3), dtype=np.float32) * 128.0
+
+    with patch.object(color_grading, 'grade_frame') as mock_grade_frame:
+        mock_grade_frame.return_value = "FILTERED_FRAME"
+        result = filter_func(frame)
+        mock_grade_frame.assert_called_once_with(frame, grade)
+        assert result == "FILTERED_FRAME"
+
+def test_get_gauss_kernel_gpu_caching():
+    """Test _get_gauss_kernel_gpu caching behavior."""
+    # Reset cache
+    color_grading._GAUSS_KERNEL_GPU = None
+
+    # Mock cv2 and torch
+    mock_cv2 = MagicMock()
+    mock_cv2.getGaussianKernel.return_value = np.ones((15, 1))
+
+    mock_torch = MagicMock()
+    mock_tensor = MagicMock()
+    mock_tensor.to.return_value.unsqueeze.return_value.unsqueeze.return_value.repeat.return_value = "KERNEL_GPU"
+    mock_torch.from_numpy.return_value = mock_tensor
+
+    with patch.object(color_grading, 'cv2', mock_cv2), patch.object(color_grading, 'torch', mock_torch):
+        kernel1 = color_grading._get_gauss_kernel_gpu("cpu")
+        kernel2 = color_grading._get_gauss_kernel_gpu("cpu")
+
+        assert kernel1 == "KERNEL_GPU"
+        assert kernel2 == "KERNEL_GPU"
+        mock_cv2.getGaussianKernel.assert_called_once()
+        mock_torch.from_numpy.assert_called_once()
+
+def test_get_vignette_gpu_caching():
+    """Test _get_vignette_gpu caching behavior."""
+    # Clear cache
+    color_grading._vignette_cache_gpu = {}
+
+    # Mock dependencies
+    mock_make_np = MagicMock(return_value=np.ones((100, 100)))
+
+    mock_torch = MagicMock()
+    mock_tensor = MagicMock()
+    mock_tensor.permute.return_value.unsqueeze.return_value.expand.return_value.to.return_value = "VIGNETTE_GPU"
+    mock_torch.from_numpy.return_value = mock_tensor
+
+    with patch.object(color_grading, '_make_vignette_mask_np', mock_make_np), patch.object(color_grading, 'torch', mock_torch):
+        vig1 = color_grading._get_vignette_gpu(100, 100, 0.5, 0.5, "cpu")
+        vig2 = color_grading._get_vignette_gpu(100, 100, 0.5, 0.5, "cpu")
+
+        assert vig1 == "VIGNETTE_GPU"
+        assert vig2 == "VIGNETTE_GPU"
+        mock_make_np.assert_called_once()
+        mock_torch.from_numpy.assert_called_once()
+
+def test_lut_torch_functions():
+    """Test _lut_teal_orange_torch and _lut_cinematic_torch execution."""
+    mock_t = MagicMock()
+    mock_lum = MagicMock()
+
+    # Mocking tensor operations to prevent errors
+    mock_tensor = MagicMock()
+
+    # Simulate mathematical operations returning the mock tensor
+    mock_t.__mul__.return_value = mock_tensor
+    mock_lum.__mul__.return_value = mock_tensor
+
+    mock_tensor.clone.return_value = mock_tensor
+    mock_tensor.__sub__.return_value = mock_tensor
+    mock_tensor.__rsub__.return_value = mock_tensor
+    mock_tensor.__mul__.return_value = mock_tensor
+    mock_tensor.__add__.return_value = mock_tensor
+    mock_tensor.clamp.return_value = mock_tensor
+    mock_tensor.abs.return_value = mock_tensor
+
+    # Mock item assignment
+    def mock_setitem(*args, **kwargs): pass
+    mock_tensor.__setitem__ = mock_setitem
+
+    try:
+        res_to = color_grading._lut_teal_orange_torch(mock_t, mock_lum)
+        assert res_to == mock_tensor
+    except Exception as e:
+        pytest.fail(f"_lut_teal_orange_torch failed: {e}")
+
+    try:
+        res_cinematic = color_grading._lut_cinematic_torch(mock_t, mock_lum)
+        assert res_cinematic == mock_tensor
+    except Exception as e:
+        pytest.fail(f"_lut_cinematic_torch failed: {e}")
+
+def test_grade_frame_torch_invalid_type(monkeypatch):
+    """Test _grade_frame_torch behavior with wrong input types gracefully failing/raising exceptions."""
+    monkeypatch.setattr(color_grading, '_DEVICE', "cpu")
+    grade = ClipGrade()
+    # Wrong data type instead of a numpy array
+    invalid_input = "not_an_array"
+
+    with pytest.raises(AttributeError):
+        color_grading._grade_frame_torch(invalid_input, grade)
+
+def test_apply_base_grade_cpu_extreme_params():
+    """Test _apply_base_grade_cpu with extremely large contrast/saturation/brightness."""
+    frame = np.ones((10, 10, 3), dtype=np.float32) * 128.0
+
+    # Extreme contrast
+    res_contrast = color_grading._apply_base_grade_cpu(frame, contrast=100.0, saturation=1.0, brightness=0.0)
+    assert res_contrast.dtype == np.float32
+    assert res_contrast.shape == (10, 10, 3)
+
+    # Extreme saturation
+    res_sat = color_grading._apply_base_grade_cpu(frame, contrast=1.0, saturation=-50.0, brightness=0.0)
+    assert res_sat.dtype == np.float32
+    assert res_sat.shape == (10, 10, 3)
+
+    # Extreme brightness (positive and negative)
+    res_bright_high = color_grading._apply_base_grade_cpu(frame, contrast=1.0, saturation=1.0, brightness=500.0)
+    pass
+
+    res_bright_low = color_grading._apply_base_grade_cpu(frame, contrast=1.0, saturation=1.0, brightness=-500.0)
+    pass
+
+def test_make_grade_filter_invalid_clip():
+    """Test applying make_grade_filter to an invalid moviepy clip object."""
+    grade = ClipGrade()
+    filter_func = color_grading.make_grade_filter(grade)
+
+    class InvalidClip:
+        def fl_image(self, func):
+            raise AttributeError("Invalid clip")
+
+    clip = InvalidClip()
+
+    with pytest.raises(AttributeError, match="Invalid clip"):
+        color_grading.apply_grade_to_clip(clip, grade)
