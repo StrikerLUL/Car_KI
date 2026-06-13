@@ -1,3 +1,4 @@
+import logging
 """
 video_analyzer.py – Intelligente Videoanalyse mit Optischem Fluss & Clip-Klassifizierung
 
@@ -277,7 +278,7 @@ def _analyze_audio(video_path: str, total_frames: int, fps: float) -> np.ndarray
             audio_scores /= np.max(audio_scores)
         os.remove(temp_audio_path)
     except Exception as e:
-        print(f"  Warnung: Audio-Analyse fehlgeschlagen – {e}")
+        logging.warning(f"  Warnung: Audio-Analyse fehlgeschlagen – {e}")
     return audio_scores
 
 
@@ -305,7 +306,7 @@ def _analyze_telemetry(video_path: str, total_frames: int, fps: float) -> np.nda
                 interp_g /= np.max(interp_g)
             scores = interp_g.astype(np.float32)
     except Exception as e:
-        print(f"  Warnung: Telemetrie konnte nicht geladen werden – {e}")
+        logging.warning(f"  Warnung: Telemetrie konnte nicht geladen werden – {e}")
     return scores
 
 
@@ -326,7 +327,7 @@ def _run_yolo_batch(model, frames: List[np.ndarray],
         results = model.predict(frames, classes=target_classes, verbose=False)
         return [float(len(r.boxes)) for r in results]
     except Exception as e:
-        print(f"  ⚠ YOLO Batch-Fehler: {e}")
+        logging.error(f"  ⚠ YOLO Batch-Fehler: {e}")
         return [0.0] * len(frames)
 
 
@@ -355,7 +356,7 @@ def find_highlights(video_path: str, num_clips: int,
     video_duration = total_frames / fps
 
     if video_duration < clip_duration:
-        print("  Warnung: Video zu kurz – gebe Start zurück.")
+        logging.warning("  Warnung: Video zu kurz – gebe Start zurück.")
         cap.release()
         return [ClipInfo(timestamp=0.0, score=0.5, motion_score=0.5, drift_score=0.0,
                          audio_score=0.5, telemetry_score=0.0, vehicle_count=0.0,
