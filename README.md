@@ -2,7 +2,7 @@
 
 An intelligent, AI-powered automated video editor designed to create high-energy Sim-Racing highlights for TikTok, Reels, and Shorts.
 
-> DISCLAIMER: This software is still under development and not yet finished. Therefore, it is restricted to strictly private use only. Commercial use, public distribution, or sharing on social media is prohibited unless you have explicit permission until the official full release.
+> ⚠️DISCLAIMER: This software is still under development and not yet finished. Therefore, it is restricted to strictly private use only. Commercial use, public distribution, or sharing on social media is prohibited unless you have explicit permission until the official full release.
 
 ## 🚀 Key Features
 
