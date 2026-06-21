@@ -1398,7 +1398,6 @@ def create_tiktok_edit(
         print(f"  ✓ Musik-adaptiver Schnitt-Plan aktiv ({len(cut_schedule)} Schnittpunkte)")
     else:
         logging.warning(f"Kein Schnitt-Plan übergeben – Fallback: alle {len(beat_times)} Beats")
-        logging.warning(f"  ⚠ Kein Schnitt-Plan übergeben – Fallback: alle {len(beat_times)} Beats")
 
     # Einheitliche Planungs-Iteration: CutPoints oder Pseudo-CutPoints aus beat_times
     if use_cut_schedule:
@@ -1775,8 +1774,6 @@ def create_tiktok_edit(
 
         except Exception as e:
             logging.error(f"Clip {sched_idx} ({os.path.basename(vp)}, t={start_t:.2f}s, dur={clip_duration:.2f}s): {e}")
-            logging.error(f"  ✗ Clip {sched_idx} ({os.path.basename(vp)}, "
-                          f"t={start_t:.2f}s, dur={clip_duration:.2f}s): {e}")
 
         current_audio_time = beat + clip_duration
 
@@ -1976,11 +1973,7 @@ def _quality_check(tag_stats: Dict[str, int],
     # Zu viele ruhige Clips
     calm_ratio = tag_stats.get("calm", 0) / total
     if calm_ratio > 0.40:
-        logging.warning(f"  ⚠  {calm_ratio*100:.0f}% der Clips sind 'calm' "
-              f"→ Video könnte langweilig wirken!")
-        logging.warning(f"{calm_ratio*100:.0f}% der Clips sind 'calm' → Video könnte langweilig wirken!")
-        logging.warning(f"  ⚠  {calm_ratio*100:.0f}% der Clips sind 'calm' "
-                        f"→ Video könnte langweilig wirken!")
+        logging.warning(f"⚠ {calm_ratio*100:.0f}% der Clips sind 'calm' → Video könnte langweilig wirken!")
     else:
         print(f"  ✓  Calm-Anteil: {calm_ratio*100:.0f}% (OK)")
 
@@ -1993,11 +1986,7 @@ def _quality_check(tag_stats: Dict[str, int],
         for src, count in source_counts.items():
             ratio = count / total
             if ratio > 0.70:
-                logging.warning(f"  ⚠  '{src}' erscheint in {ratio*100:.0f}% aller Clips "
-                      f"→ mehr Kamerawechsel wären besser!")
-                logging.warning(f"'{src}' erscheint in {ratio*100:.0f}% aller Clips → mehr Kamerawechsel wären besser!")
-                logging.warning(f"  ⚠  '{src}' erscheint in {ratio*100:.0f}% aller Clips "
-                                f"→ mehr Kamerawechsel wären besser!")
+                logging.warning(f"⚠ '{src}' erscheint in {ratio*100:.0f}% aller Clips → mehr Kamerawechsel wären besser!")
             else:
                 print(f"  ✓  '{src}': {ratio*100:.0f}% (OK)")
 
