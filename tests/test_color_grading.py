@@ -433,3 +433,210 @@ def test_make_grade_filter_invalid_clip():
 
     with pytest.raises(AttributeError, match="Invalid clip"):
         color_grading.apply_grade_to_clip(clip, grade)
+def test_lut_cinematic_torch_extreme_values():
+    """Test _lut_cinematic_torch correctly handles edge case tensors."""
+    if not color_grading._TORCH_OK:
+        pytest.skip("PyTorch not available")
+
+    import torch
+    t = torch.zeros((1, 3, 0, 0), dtype=torch.float32).to(color_grading._DEVICE)
+    lum = torch.zeros((1, 1, 0, 0), dtype=torch.float32).to(color_grading._DEVICE)
+
+    try:
+        out = color_grading._lut_cinematic_torch(t, lum)
+        assert out.shape == (1, 3, 0, 0)
+    except Exception as e:
+        pytest.fail(f"Raised exception on empty tensor: {e}")
+
+    # Test extreme values
+    t_extreme = torch.full((1, 3, 10, 10), 500.0, dtype=torch.float32).to(color_grading._DEVICE)
+    lum_extreme = torch.full((1, 1, 10, 10), 500.0, dtype=torch.float32).to(color_grading._DEVICE)
+    out_extreme = color_grading._lut_cinematic_torch(t_extreme, lum_extreme)
+    assert out_extreme.shape == (1, 3, 10, 10)
+
+
+def test_lut_teal_orange_torch_extreme_values():
+    """Test _lut_teal_orange_torch correctly handles edge case tensors."""
+    if not color_grading._TORCH_OK:
+        pytest.skip("PyTorch not available")
+
+    import torch
+    t = torch.zeros((1, 3, 0, 0), dtype=torch.float32).to(color_grading._DEVICE)
+    lum = torch.zeros((1, 1, 0, 0), dtype=torch.float32).to(color_grading._DEVICE)
+
+    try:
+        out = color_grading._lut_teal_orange_torch(t, lum)
+        assert out.shape == (1, 3, 0, 0)
+    except Exception as e:
+        pytest.fail(f"Raised exception on empty tensor: {e}")
+
+    # Test extreme values
+    t_extreme = torch.full((1, 3, 10, 10), -100.0, dtype=torch.float32).to(color_grading._DEVICE)
+    lum_extreme = torch.full((1, 1, 10, 10), -100.0, dtype=torch.float32).to(color_grading._DEVICE)
+    out_extreme = color_grading._lut_teal_orange_torch(t_extreme, lum_extreme)
+    assert out_extreme.shape == (1, 3, 10, 10)
+
+
+def test_grade_frame_torch_full_features():
+    """Test _grade_frame_torch with all features enabled (LUT, crush, bloom, vignette)."""
+    if not color_grading._TORCH_OK:
+        pytest.skip("PyTorch not available")
+
+    grade = ClipGrade(
+        contrast=1.2, saturation=1.1, brightness=5.0,
+        lut_preset="teal_orange", lut_strength=0.8,
+        highlights_crush=True, crush_threshold=0.5, crush_strength=1.0,
+        haze_bloom=True, bloom_threshold=0.5, bloom_strength=1.0,
+        vignette_strength=0.5, vignette_radius=0.5
+    )
+
+    frame = np.ones((100, 100, 3), dtype=np.uint8) * 128
+
+    try:
+        result = color_grading._grade_frame_torch(frame, grade)
+        assert result.shape == (100, 100, 3)
+        assert result.dtype == np.uint8
+    except Exception as e:
+        pytest.fail(f"_grade_frame_torch failed with real tensors: {e}")
+
+
+def test_grade_frame_torch_invalid_input():
+    """Test that _grade_frame_torch handles errors properly on invalid input."""
+    if not color_grading._TORCH_OK:
+        pytest.skip("PyTorch not available")
+
+    grade = ClipGrade()
+
+    # Pass an invalid shape that PyTorch cannot convert properly
+    invalid_frame = "not_an_array"
+
+    with pytest.raises(AttributeError):
+        color_grading._grade_frame_torch(invalid_frame, grade)
+
+
+def test_lut_cinematic_torch_extreme_values_mocked(monkeypatch):
+    """Test _lut_cinematic_torch correctly handles edge case tensors using mocks."""
+    try:
+        import torch
+    except ImportError:
+        pytest.skip("PyTorch not available")
+    # Ensure Torch appears OK
+    monkeypatch.setattr(color_grading, '_TORCH_OK', True)
+    import torch
+
+    # We must patch torch device if not available
+    device = torch.device("cpu")
+    monkeypatch.setattr(color_grading, '_DEVICE', device)
+
+    t = torch.zeros((1, 3, 0, 0), dtype=torch.float32).to(device)
+    lum = torch.zeros((1, 1, 0, 0), dtype=torch.float32).to(device)
+
+    try:
+        out = color_grading._lut_cinematic_torch(t, lum)
+        assert out.shape == (1, 3, 0, 0)
+    except Exception as e:
+        pytest.fail(f"Raised exception on empty tensor: {e}")
+
+    # Test extreme values
+    t_extreme = torch.full((1, 3, 10, 10), 500.0, dtype=torch.float32).to(device)
+    lum_extreme = torch.full((1, 1, 10, 10), 500.0, dtype=torch.float32).to(device)
+    out_extreme = color_grading._lut_cinematic_torch(t_extreme, lum_extreme)
+    assert out_extreme.shape == (1, 3, 10, 10)
+
+
+def test_lut_teal_orange_torch_extreme_values_mocked(monkeypatch):
+    """Test _lut_teal_orange_torch correctly handles edge case tensors using mocks."""
+    try:
+        import torch
+    except ImportError:
+        pytest.skip("PyTorch not available")
+    monkeypatch.setattr(color_grading, '_TORCH_OK', True)
+    import torch
+
+    device = torch.device("cpu")
+    monkeypatch.setattr(color_grading, '_DEVICE', device)
+
+    t = torch.zeros((1, 3, 0, 0), dtype=torch.float32).to(device)
+    lum = torch.zeros((1, 1, 0, 0), dtype=torch.float32).to(device)
+
+    try:
+        out = color_grading._lut_teal_orange_torch(t, lum)
+        assert out.shape == (1, 3, 0, 0)
+    except Exception as e:
+        pytest.fail(f"Raised exception on empty tensor: {e}")
+
+    # Test extreme values
+    t_extreme = torch.full((1, 3, 10, 10), -100.0, dtype=torch.float32).to(device)
+    lum_extreme = torch.full((1, 1, 10, 10), -100.0, dtype=torch.float32).to(device)
+    out_extreme = color_grading._lut_teal_orange_torch(t_extreme, lum_extreme)
+    assert out_extreme.shape == (1, 3, 10, 10)
+
+
+def test_grade_frame_torch_full_features_mocked(monkeypatch):
+    """Test _grade_frame_torch with all features enabled (LUT, crush, bloom, vignette) using mocks."""
+    try:
+        import torch
+    except ImportError:
+        pytest.skip("PyTorch not available")
+    monkeypatch.setattr(color_grading, '_TORCH_OK', True)
+    import torch
+
+    device = torch.device("cpu")
+    monkeypatch.setattr(color_grading, '_DEVICE', device)
+
+    grade = ClipGrade(
+        contrast=1.2, saturation=1.1, brightness=5.0,
+        lut_preset="teal_orange", lut_strength=0.8,
+        highlights_crush=True, crush_threshold=0.5, crush_strength=1.0,
+        haze_bloom=True, bloom_threshold=0.5, bloom_strength=1.0,
+        vignette_strength=0.5, vignette_radius=0.5
+    )
+
+    frame = np.ones((100, 100, 3), dtype=np.uint8) * 128
+
+    try:
+        result = color_grading._grade_frame_torch(frame, grade)
+        assert result.shape == (100, 100, 3)
+        assert result.dtype == np.uint8
+    except Exception as e:
+        pytest.fail(f"_grade_frame_torch failed with real tensors: {e}")
+
+
+def test_grade_frame_torch_invalid_input_mocked(monkeypatch):
+    """Test that _grade_frame_torch handles errors properly on invalid input."""
+    try:
+        import torch
+    except ImportError:
+        pytest.skip("PyTorch not available")
+    monkeypatch.setattr(color_grading, '_TORCH_OK', True)
+    import torch
+
+    device = torch.device("cpu")
+    monkeypatch.setattr(color_grading, '_DEVICE', device)
+
+    grade = ClipGrade()
+
+    # Pass an invalid shape that PyTorch cannot convert properly
+    invalid_frame = "not_an_array"
+
+    with pytest.raises(AttributeError):
+        color_grading._grade_frame_torch(invalid_frame, grade)
+
+def test_get_gauss_kernel_gpu_caching(monkeypatch):
+    """Test that _get_gauss_kernel_gpu caches the kernel."""
+    try:
+        import torch
+    except ImportError:
+        pytest.skip("PyTorch not available")
+    monkeypatch.setattr(color_grading, '_TORCH_OK', True)
+    import torch
+    device = torch.device("cpu")
+
+    # Clear cache
+    color_grading._GAUSS_KERNEL_GPU = None
+
+    kernel1 = color_grading._get_gauss_kernel_gpu(device)
+    kernel2 = color_grading._get_gauss_kernel_gpu(device)
+
+    assert kernel1 is kernel2
+    assert kernel1.shape == (3, 1, 15, 15)

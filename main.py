@@ -10,7 +10,7 @@ from analysis_cache import get_audio_analysis_cached, get_highlights_cached
 from pipeline_config import PipelineConfig
 
 
-logging.basicConfig(level=logging.INFO, format='%(levelname)s [%(filename)s:%(lineno)d] %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s [%(filename)s:%(lineno)d] %(message)s')
 
 
 def _parse_args():
@@ -245,8 +245,6 @@ def run_pipeline(config: PipelineConfig, preview: bool = False, no_cache: bool =
 
 
 def main():
-    logging.basicConfig(level=logging.INFO, format='%(levelname)s [%(filename)s:%(lineno)d] %(message)s')
-
     args = _parse_args()
 
     # ── Config-Validierung beim Start ────────────────────────────────────────
@@ -338,7 +336,7 @@ def main():
         try:
             return float(raw) if raw else default
         except ValueError:
-            print(f"  Ungültige Eingabe, nutze Standard ({default}).")
+            logging.warning(f"  Ungültige Eingabe, nutze Standard ({default}).")
             return default
 
     vignette = _ask_float("  Vignette (0.0 = aus, 0.5 = Standard, 1.0 = max)", 0.50)
