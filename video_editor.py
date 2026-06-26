@@ -79,7 +79,7 @@ def _write_videofile_with_retry(video_clip, max_retries=3, delay_sec=5.0, **kwar
             return True
         except Exception as e:
             last_exception = e
-            logging.error(f"FFMPEG-Export Fehler (Versuch {attempt}/{max_retries}): {e}")
+            logging.exception(f"FFMPEG-Export Fehler (Versuch {attempt}/{max_retries}).")
             if attempt < max_retries:
                 logging.info(f"Warte {delay_sec} Sekunden vor dem nächsten Versuch...")
                 time.sleep(delay_sec)
@@ -95,7 +95,7 @@ def _open_video_with_retry(video_path: str, max_retries=3, delay_sec=2.0) -> Vid
             return VideoFileClip(video_path)
         except Exception as e:
             last_exception = e
-            logging.error(f"FFMPEG-Import Fehler bei Video (Versuch {attempt}/{max_retries}): {e}")
+            logging.exception(f"FFMPEG-Import Fehler bei Video (Versuch {attempt}/{max_retries}).")
             if attempt < max_retries:
                 time.sleep(delay_sec)
     raise last_exception
@@ -108,7 +108,7 @@ def _open_audio_with_retry(audio_path: str, max_retries=3, delay_sec=2.0) -> Aud
             return AudioFileClip(audio_path)
         except Exception as e:
             last_exception = e
-            logging.error(f"FFMPEG-Import Fehler bei Audio (Versuch {attempt}/{max_retries}): {e}")
+            logging.exception(f"FFMPEG-Import Fehler bei Audio (Versuch {attempt}/{max_retries}).")
             if attempt < max_retries:
                 time.sleep(delay_sec)
     raise last_exception
@@ -1774,9 +1774,7 @@ def create_tiktok_edit(
             tag_stats[info.tag] = tag_stats.get(info.tag, 0) + 1
 
         except Exception as e:
-            logging.error(f"Clip {sched_idx} ({os.path.basename(vp)}, t={start_t:.2f}s, dur={clip_duration:.2f}s): {e}")
-            logging.error(f"  ✗ Clip {sched_idx} ({os.path.basename(vp)}, "
-                          f"t={start_t:.2f}s, dur={clip_duration:.2f}s): {e}")
+            logging.exception(f"Clip {sched_idx} ({os.path.basename(vp)}, t={start_t:.2f}s, dur={clip_duration:.2f}s) fehlgeschlagen.")
 
         current_audio_time = beat + clip_duration
 
@@ -1798,7 +1796,7 @@ def create_tiktok_edit(
                 try:
                     final_clips.append(video.subclip(start_t, start_t + leftover))
                 except Exception as e:
-                    logging.error(f"Letzter Clip: {e}")
+                    logging.exception("Letzter Clip fehlgeschlagen.")
 
     if not final_clips:
         logging.error("Fehler: Konnte keine Clips erstellen.")
