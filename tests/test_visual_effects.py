@@ -524,6 +524,123 @@ def test_make_text_mask_sequence_none_words():
     with pytest.raises(TypeError):
         visual_effects.make_text_mask_sequence(clip, words=None)
 
+def test_make_blend_text_overlay_edge_cases(monkeypatch):
+    """Test make_blend_text_overlay with invalid text and exception handling."""
+    import visual_effects
+    from unittest.mock import MagicMock
+
+    class InvalidClip:
+        @property
+        def size(self):
+            raise AttributeError("Invalid size property")
+
+    clip = InvalidClip()
+
+    # Should catch the AttributeError from missing size and return original clip
+    result1 = visual_effects.make_blend_text_overlay(clip, "TEST", blend_mode="screen")
+    assert result1 == clip
+
+    # Passing empty string text - exception in drawing or returning original clip
+    mock_clip = MagicMock()
+    mock_clip.size = (1920, 1080)
+
+    # Mocking PIL.ImageDraw to raise exception to simulate failure
+    import sys
+    mock_pil = MagicMock()
+    mock_pil.ImageDraw.Draw.side_effect = Exception("Drawing failed")
+    monkeypatch.setitem(sys.modules, 'PIL', mock_pil)
+
+    result2 = visual_effects.make_blend_text_overlay(mock_clip, "TEST", blend_mode="screen")
+    assert result2 == mock_clip
+
+def test_get_beat_synced_words_edge_cases(monkeypatch):
+    """Test get_beat_synced_words with exceptions and empty inputs."""
+    import visual_effects
+    import sys
+
+    # Edge case 1: empty beat_times list
+    assert visual_effects.get_beat_synced_words("dummy.mp3", []) == []
+
+    # Edge case 2: Whisper throws exception
+    class ExceptionWhisperModel:
+        def to(self, device):
+            return self
+        def transcribe(self, audio_path, **kwargs):
+            raise RuntimeError("Transcription failed")
+
+    class MockWhisper:
+        def load_model(self, name):
+            return ExceptionWhisperModel()
+
+    monkeypatch.setitem(sys.modules, 'whisper', MockWhisper())
+    visual_effects._WHISPER_TIMED_WORDS.clear()
+
+    # When exception is thrown, should fall back to empty strings since no timed words
+    # and strict_mode defaults to True
+    beats = [1.0, 2.0]
+    result = visual_effects.get_beat_synced_words("dummy.mp3", beats, max_dist=0.1)
+    assert result == ["", ""]
+
+def test_extract_music_words_invalid_file(monkeypatch):
+    """Test extract_music_words with invalid files and empty inputs gracefully falling back."""
+    import visual_effects
+    import sys
+    from unittest.mock import MagicMock
+
+    # Mock mutagen to raise exception
+    class MockMutagenFile:
+        def __init__(self, *args, **kwargs):
+            raise ValueError("Invalid file")
+
+    mock_mutagen = MagicMock()
+    mock_mutagen.File = MockMutagenFile
+    monkeypatch.setitem(sys.modules, 'mutagen', mock_mutagen)
+    monkeypatch.setattr(visual_effects, 'transcribe_audio_for_words', lambda x: [])
+
+    # The function should catch the exception and fall back to returning _RACING_WORDS
+    words = visual_effects.extract_music_words("invalid_file.mp3", use_lyrics=True)
+    assert len(words) > 0
+    assert words == visual_effects._RACING_WORDS
+
+
+def test_transcribe_audio_for_words_edge_cases(monkeypatch):
+    """Test transcribe_audio_for_words handles whisper exceptions and empty segments gracefully."""
+    import visual_effects
+    import sys
+
+    class ExceptionWhisperModel:
+        def to(self, device):
+            return self
+        def transcribe(self, audio_path, **kwargs):
+            raise RuntimeError("CUDA out of memory")
+
+    class MockWhisper:
+        def load_model(self, name):
+            return ExceptionWhisperModel()
+
+    monkeypatch.setitem(sys.modules, 'whisper', MockWhisper())
+    visual_effects._WHISPER_WORDS = None
+
+    # Verify exception is caught and returns empty list
+    words = visual_effects.transcribe_audio_for_words("dummy.mp3")
+    assert words == []
+
+    # Test empty segments
+    class EmptyWhisperModel:
+        def to(self, device):
+            return self
+        def transcribe(self, audio_path, **kwargs):
+            return {"segments": []}
+
+    class MockWhisperEmpty:
+        def load_model(self, name):
+            return EmptyWhisperModel()
+
+    monkeypatch.setitem(sys.modules, 'whisper', MockWhisperEmpty())
+    visual_effects._WHISPER_WORDS = None
+
+    words = visual_effects.transcribe_audio_for_words("dummy.mp3")
+    assert words == []
 def test_make_text_mask_clip_frame_generation(monkeypatch):
     """Test frame generation logic for make_text_mask_clip, including fade in/out."""
     import numpy as np
