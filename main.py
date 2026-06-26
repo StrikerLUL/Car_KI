@@ -89,7 +89,7 @@ def _clear_cache_if_requested(clear_cache: bool) -> None:
         shutil.rmtree(cache_dir)
         print("  [CACHE] .cache wurde erfolgreich geloescht.")
     except Exception as e:
-        logging.error(f"  [CACHE] Konnte .cache nicht loeschen: {e}")
+        logging.exception("  [CACHE] Konnte .cache nicht loeschen.")
         sys.exit(1)
 
 
@@ -131,7 +131,7 @@ def run_pipeline(config: PipelineConfig, preview: bool = False, no_cache: bool =
     try:
         config.validate()
     except (ValueError, FileNotFoundError) as e:
-        logging.error(f"Fehler bei der Konfigurationsvalidierung: {e}")
+        logging.exception("Fehler bei der Konfigurationsvalidierung.")
         sys.exit(1)
 
     if no_cache:
@@ -264,7 +264,7 @@ def main():
                 logging.error(f"Fehler in Template: watermark_opacity muss zwischen 0.0 und 1.0 liegen.")
                 sys.exit(1)
         except Exception as e:
-            logging.error(f"Fehler beim Parsen der Template-Datei: {e}")
+            logging.exception("Fehler beim Parsen der Template-Datei.")
             sys.exit(1)
 
     if args.save_template:
@@ -456,7 +456,7 @@ def main():
             template_overrides = load_edit_template(args.template)
             print(f"  ✓ Template geladen: {args.template}")
         except Exception as e:
-            logging.error(f"Fehler: Template konnte nicht geladen werden: {e}")
+            logging.exception("Fehler: Template konnte nicht geladen werden.")
             sys.exit(1)
 
     if args.save_template:
@@ -488,7 +488,7 @@ def main():
             save_edit_template(args.save_template, save_payload)
             print(f"  ✓ Template gespeichert: {args.save_template}")
         except Exception as e:
-            logging.error(f"Fehler: Template konnte nicht gespeichert werden: {e}")
+            logging.exception("Fehler: Template konnte nicht gespeichert werden.")
             sys.exit(1)
 
     run_pipeline(config, preview=args.preview, no_cache=args.no_cache)
