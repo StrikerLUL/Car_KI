@@ -249,3 +249,174 @@ def test_run_yolo_batch_exception():
 
     result = video_analyzer._run_yolo_batch(mock_model, frames, [2, 3])
     assert result == [0.0]
+
+
+def test_find_highlights_invalid_file():
+    """Test find_highlights with a non-existent file."""
+    clips = video_analyzer.find_highlights("non_existent_file_12345.mp4", num_clips=5)
+    assert len(clips) == 1
+    assert clips[0].timestamp == 0.0
+    assert clips[0].source == "non_existent_file_12345.mp4"
+
+def test_find_highlights_zero_clips(tmp_path):
+    """Test find_highlights with num_clips=0. Should not raise error and handle gracefully."""
+    # Create a dummy video file
+    dummy_video = tmp_path / "dummy.mp4"
+    dummy_video.write_bytes(b"dummy data")
+
+    # Mocking cap to act like a valid but very short video to avoid actual cv2 processing
+    from unittest.mock import MagicMock
+    mock_cap = MagicMock()
+    mock_cap.get.side_effect = lambda prop: 30.0 if prop == video_analyzer.cv2.CAP_PROP_FPS else (10 if prop == video_analyzer.cv2.CAP_PROP_FRAME_COUNT else 0)
+    mock_cap.read.return_value = (True, video_analyzer.np.zeros((100, 100, 3)))
+    mock_cap.isOpened.return_value = True
+
+    original_cap = video_analyzer.cv2.VideoCapture
+    video_analyzer.cv2.VideoCapture = lambda x: mock_cap
+    try:
+        clips = video_analyzer.find_highlights(str(dummy_video), num_clips=0)
+        assert len(clips) == 1
+        assert clips[0].timestamp == 0.0
+    finally:
+        video_analyzer.cv2.VideoCapture = original_cap
+
+def test_find_highlights_invalid_format(tmp_path):
+    """Test find_highlights with a non-video text file."""
+    text_file = tmp_path / "invalid.txt"
+    text_file.write_text("This is not a video file.")
+
+    clips = video_analyzer.find_highlights(str(text_file), num_clips=5)
+    assert len(clips) == 1
+    assert clips[0].timestamp == 0.0
+    assert clips[0].source == str(text_file)
+
+def test_find_highlights_video_too_short(tmp_path, monkeypatch):
+    """Test find_highlights fallback when video duration is shorter than clip duration."""
+    import video_analyzer
+    dummy_video = tmp_path / "short.mp4"
+    dummy_video.write_bytes(b"dummy data")
+
+    mock_cap = MagicMock()
+    mock_cap.get.side_effect = lambda prop: 30.0 if prop == video_analyzer.cv2.CAP_PROP_FPS else (10 if prop == video_analyzer.cv2.CAP_PROP_FRAME_COUNT else 0)
+    mock_cap.isOpened.return_value = True
+
+    monkeypatch.setattr(video_analyzer.cv2, 'VideoCapture', lambda x: mock_cap)
+
+    clips = video_analyzer.find_highlights(str(dummy_video), num_clips=5, clip_duration=2.0)
+
+    assert len(clips) == 1
+    assert clips[0].timestamp == 0.0
+    assert clips[0].source == str(dummy_video)
+    mock_cap.release.assert_called_once()
+
+def test_find_highlights_yolo_exception(tmp_path, monkeypatch):
+    """Test find_highlights when YOLO model instantiation throws an Exception."""
+    import video_analyzer
+    dummy_video = tmp_path / "vid.mp4"
+    dummy_video.write_bytes(b"dummy data")
+
+    mock_cap = MagicMock()
+    mock_cap.get.side_effect = lambda prop: 30.0 if prop == video_analyzer.cv2.CAP_PROP_FPS else (300 if prop == video_analyzer.cv2.CAP_PROP_FRAME_COUNT else 0)
+    mock_cap.read.return_value = (True, video_analyzer.np.zeros((100, 100, 3)))
+    mock_cap.isOpened.return_value = True
+
+    monkeypatch.setattr(video_analyzer.cv2, 'VideoCapture', lambda x: mock_cap)
+    monkeypatch.setattr(video_analyzer, 'YOLO', MagicMock(side_effect=Exception("Simulated YOLO failure")))
+
+    # Mocking out the ThreadPoolExecutor logic to avoid complex async stuff in this unit test
+    monkeypatch.setattr(video_analyzer, '_analyze_audio', MagicMock(return_value=video_analyzer.np.zeros(300)))
+    monkeypatch.setattr(video_analyzer, '_analyze_telemetry', MagicMock(return_value=video_analyzer.np.zeros(300)))
+    monkeypatch.setattr(video_analyzer, '_compute_optical_flow', MagicMock(return_value=[{"motion_score": 0.0, "drift_score": 0.0, "cam_type": "external"} for _ in range(300)]))
+
+    clips = video_analyzer.find_highlights(str(dummy_video), num_clips=1, clip_duration=2.0)
+
+    assert len(clips) >= 1
+
+def test_find_highlights_empty_raw_scores(tmp_path, monkeypatch):
+    """Test find_highlights fallback when raw_scores is empty."""
+    import video_analyzer
+    dummy_video = tmp_path / "vid.mp4"
+    dummy_video.write_bytes(b"dummy data")
+
+    mock_cap = MagicMock()
+    mock_cap.get.side_effect = lambda prop: 30.0 if prop == video_analyzer.cv2.CAP_PROP_FPS else (300 if prop == video_analyzer.cv2.CAP_PROP_FRAME_COUNT else 0)
+    mock_cap.read.return_value = (False, None)  # Fail immediately on read, raw_scores will be empty
+    mock_cap.isOpened.return_value = True
+
+    monkeypatch.setattr(video_analyzer.cv2, 'VideoCapture', lambda x: mock_cap)
+    monkeypatch.setattr(video_analyzer, '_analyze_audio', MagicMock(return_value=video_analyzer.np.zeros(300)))
+    monkeypatch.setattr(video_analyzer, '_analyze_telemetry', MagicMock(return_value=video_analyzer.np.zeros(300)))
+    monkeypatch.setattr(video_analyzer, '_compute_optical_flow', MagicMock(return_value=[]))
+    monkeypatch.setattr(video_analyzer, 'YOLO', MagicMock())
+
+    clips = video_analyzer.find_highlights(str(dummy_video), num_clips=1, clip_duration=2.0)
+
+    assert len(clips) == 1
+    assert clips[0].timestamp == 0.0
+
+def test_find_highlights_overlap_filtering(tmp_path, monkeypatch):
+    """Test that clips within clip_duration are correctly filtered."""
+    import video_analyzer
+    dummy_video = tmp_path / "vid.mp4"
+    dummy_video.write_bytes(b"dummy data")
+
+    mock_cap = MagicMock()
+    mock_cap.get.side_effect = lambda prop: 30.0 if prop == video_analyzer.cv2.CAP_PROP_FPS else (300 if prop == video_analyzer.cv2.CAP_PROP_FRAME_COUNT else 0)
+
+    frames = []
+    for _ in range(15):
+        frames.append((True, video_analyzer.np.zeros((10, 10, 3))))
+    frames.append((False, None))
+    mock_cap.read.side_effect = frames
+    mock_cap.isOpened.return_value = True
+
+    monkeypatch.setattr(video_analyzer.cv2, 'VideoCapture', lambda x: mock_cap)
+    monkeypatch.setattr(video_analyzer, '_analyze_audio', MagicMock(return_value=video_analyzer.np.zeros(300)))
+    monkeypatch.setattr(video_analyzer, '_analyze_telemetry', MagicMock(return_value=video_analyzer.np.zeros(300)))
+
+    flow = [{"motion_score": 0.9, "drift_score": 0.0, "cam_type": "external"} for _ in range(300)]
+    monkeypatch.setattr(video_analyzer, '_compute_optical_flow', MagicMock(return_value=flow))
+    monkeypatch.setattr(video_analyzer, 'YOLO', MagicMock())
+    monkeypatch.setattr(video_analyzer, '_run_yolo_batch', MagicMock(return_value=[1.0]*100))
+
+    clips = video_analyzer.find_highlights(str(dummy_video), num_clips=2, clip_duration=2.0)
+
+    # We should have at least 1 clip, but overlaps should be filtered, maybe filled by gap filling.
+    assert len(clips) >= 1
+    if len(clips) > 1:
+        # If there are multiple clips, verify they are at least clip_duration/2 apart (due to gap filling)
+        assert abs(clips[0].timestamp - clips[1].timestamp) >= 1.0
+
+def test_find_highlights_gap_filling(tmp_path, monkeypatch):
+    """Test gap filling logic when len(selected) < num_clips."""
+    import video_analyzer
+    dummy_video = tmp_path / "vid.mp4"
+    dummy_video.write_bytes(b"dummy data")
+
+    mock_cap = MagicMock()
+    mock_cap.get.side_effect = lambda prop: 30.0 if prop == video_analyzer.cv2.CAP_PROP_FPS else (300 if prop == video_analyzer.cv2.CAP_PROP_FRAME_COUNT else 0)
+
+    frames = []
+    for _ in range(20):
+        frames.append((True, video_analyzer.np.zeros((10, 10, 3))))
+    frames.append((False, None))
+    mock_cap.read.side_effect = frames
+    mock_cap.isOpened.return_value = True
+
+    monkeypatch.setattr(video_analyzer.cv2, 'VideoCapture', lambda x: mock_cap)
+    monkeypatch.setattr(video_analyzer, '_analyze_audio', MagicMock(return_value=video_analyzer.np.zeros(300)))
+    monkeypatch.setattr(video_analyzer, '_analyze_telemetry', MagicMock(return_value=video_analyzer.np.zeros(300)))
+
+    flow = [{"motion_score": 0.9, "drift_score": 0.0, "cam_type": "external"} for _ in range(300)]
+    monkeypatch.setattr(video_analyzer, '_compute_optical_flow', MagicMock(return_value=flow))
+    monkeypatch.setattr(video_analyzer, 'YOLO', MagicMock())
+    monkeypatch.setattr(video_analyzer, '_run_yolo_batch', MagicMock(return_value=[1.0]*100))
+
+    # Ask for 10 clips, but there are only ~20 sample frames, they will overlap a lot.
+    # Gap filling should trigger to fill up the list using a smaller threshold (0.5 * clip_duration)
+    clips = video_analyzer.find_highlights(str(dummy_video), num_clips=10, clip_duration=2.0)
+
+    # Check that gap filling added at least some clips, and they respect the 0.5 * clip_duration threshold
+    for i in range(len(clips)):
+        for j in range(i + 1, len(clips)):
+            assert abs(clips[i].timestamp - clips[j].timestamp) >= 1.0

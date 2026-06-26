@@ -1,3 +1,4 @@
+import logging
 """
 visual_effects.py – Professionelle visuelle Effekte für den TikTok-Editor
 
@@ -75,7 +76,7 @@ def make_text_mask_clip(
         from PIL import Image, ImageDraw, ImageFilter
         from moviepy.editor import VideoClip
     except ImportError:
-        print("  ✗ Text-Mask: Pillow fehlt → pip install Pillow")
+        logging.error("  ✗ Text-Mask: Pillow fehlt → pip install Pillow")
         return None
 
     try:
@@ -133,7 +134,7 @@ def make_text_mask_clip(
         return clip
 
     except Exception as e:
-        print(f"  [ERR] Text-Mask: {e}")
+        logging.error(f"  [ERR] Text-Mask: {e}")
         return None
 
 
@@ -183,7 +184,7 @@ def make_pip_overlay(
         return CompositeVideoClip([main_clip, pip_positioned], size=(mw, mh))
 
     except Exception as e:
-        print(f"  [ERR] PiP: {e}")
+        logging.error(f"  [ERR] PiP: {e}")
         return main_clip
 
 
@@ -233,7 +234,7 @@ def make_zoom_punch(
         return clip.fl(_zoom_frame, apply_to=["video"], keep_duration=True)
 
     except Exception as e:
-        print(f"  [ERR] Zoom-Punch: {e}")
+        logging.error(f"  [ERR] Zoom-Punch: {e}")
         return clip
 
 
@@ -284,7 +285,7 @@ def make_glitch_effect(
         return clip.fl(_glitch_frame, apply_to=["video"], keep_duration=True)
 
     except Exception as e:
-        print(f"  [ERR] Glitch: {e}")
+        logging.error(f"  [ERR] Glitch: {e}")
         return clip
 
 
@@ -307,7 +308,7 @@ def apply_letterbox(clip, bar_fraction: float = 0.07) -> object:
         return clip.fl(_lb_frame, apply_to=["video"], keep_duration=True)
 
     except Exception as e:
-        print(f"  [ERR] Letterbox: {e}")
+        logging.error(f"  [ERR] Letterbox: {e}")
         return clip
 
 
@@ -359,9 +360,9 @@ def transcribe_audio_for_words(audio_path: str) -> List[str]:
             
         return words
     except ImportError:
-        print("  [ERR] openai-whisper ist nicht installiert. Nutze Fallback.")
+        logging.error("  [ERR] openai-whisper ist nicht installiert. Nutze Fallback.")
     except Exception as e:
-        print(f"  [ERR] Whisper Transkription fehlgeschlagen: {e}")
+        logging.error(f"  [ERR] Whisper Transkription fehlgeschlagen: {e}")
         
     return []
 
@@ -433,9 +434,9 @@ def get_beat_synced_words(
             print(f"  [WHISPER] {len(timed)} Wörter mit Timestamps erkannt")
 
         except ImportError:
-            print("  [WHISPER] Nicht installiert – nutze Fallback-Wörter")
+            logging.warning("  [WHISPER] Nicht installiert – nutze Fallback-Wörter")
         except Exception as e:
-            print(f"  [WHISPER] Fehler: {e} – nutze Fallback-Wörter")
+            logging.error(f"  [WHISPER] Fehler: {e} – nutze Fallback-Wörter")
 
     # ── Jedem Beat ein Wort zuordnen ──────────────────────────────────────────
     if not timed:
@@ -568,7 +569,7 @@ def make_blend_text_overlay(
     try:
         from PIL import Image, ImageDraw
     except ImportError:
-        print("  ✗ Blend-Text: Pillow fehlt → pip install Pillow")
+        logging.error("  ✗ Blend-Text: Pillow fehlt → pip install Pillow")
         return clip
 
     try:
@@ -621,7 +622,7 @@ def make_blend_text_overlay(
         return result_clip
 
     except Exception as e:
-        print(f"  [ERR] Blend-Text: {e}")
+        logging.error(f"  [ERR] Blend-Text: {e}")
         return clip
 
 
@@ -716,7 +717,7 @@ def make_split_screen_glitch(
         return clip.fl(_split_frame, apply_to=["video"], keep_duration=True)
 
     except Exception as e:
-        print(f"  [ERR] Split-Screen-Glitch: {e}")
+        logging.error(f"  [ERR] Split-Screen-Glitch: {e}")
         return clip
 
 
@@ -745,7 +746,7 @@ def make_bw_overlay(clip, contrast_boost: float = 1.15) -> object:
         return clip.fl(_bw_frame, apply_to=["video"], keep_duration=True)
 
     except Exception as e:
-        print(f"  [ERR] B&W Overlay: {e}")
+        logging.error(f"  [ERR] B&W Overlay: {e}")
         return clip
 
 
@@ -791,7 +792,7 @@ def make_watermark_overlay(clip, text: str, opacity: float = 0.4) -> object:
         return clip.fl(_filter, apply_to=["video"], keep_duration=True)
 
     except Exception as e:
-        print(f"  [ERR] Watermark: {e}")
+        logging.error(f"  [ERR] Watermark: {e}")
         return clip
 
 # ---------------------------------------------------------------------------
@@ -860,7 +861,7 @@ def make_camera_shake(clip, intensity: float = 0.05, shake_frames: int = 5) -> o
         return clip.fl(_shake_frame, apply_to=["video"], keep_duration=True)
 
     except Exception as e:
-        print(f"  [ERR] Camera Shake: {e}")
+        logging.error(f"  [ERR] Camera Shake: {e}")
         return clip
 
 # ---------------------------------------------------------------------------
@@ -878,5 +879,5 @@ def make_mirror_x(clip) -> object:
 
         return clip.fl(_mirror_frame, apply_to=["video"], keep_duration=True)
     except Exception as e:
-        print(f"  [ERR] Mirror X: {e}")
+        logging.error(f"  [ERR] Mirror X: {e}")
         return clip
