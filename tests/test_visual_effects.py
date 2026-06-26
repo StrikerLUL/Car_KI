@@ -1,3 +1,4 @@
+import numpy as np
 import sys
 from unittest.mock import MagicMock
 
@@ -365,7 +366,7 @@ def test_make_text_mask_clip_valid(monkeypatch):
             return 5.0
         def get_frame(self, t):
             import numpy as np
-            return np.zeros((1080, 1920, 3), dtype=np.uint8)
+            return np.zeros((1080, 1920, 3), dtype=__import__('numpy').uint8)
 
     clip = ValidClip()
     # Mocking pillow features would require complex mocks, so we just test the missing pillow path
@@ -504,7 +505,7 @@ def test_apply_letterbox_invalid_fraction():
         def fl(self, func, *args, **kwargs):
             # Just test if the inner function crashes on edge cases
             def get_frame(t):
-                return np.ones((1080, 1920, 3), dtype=np.uint8) * 255
+                return np.ones((1080, 1920, 3), dtype=__import__('numpy').uint8) * 255
             try:
                 func(get_frame, 0.0)
             except Exception as e:
@@ -524,11 +525,103 @@ def test_apply_letterbox_invalid_fraction():
 def test_make_text_mask_sequence_none_words():
     """Test make_text_mask_sequence with unexpected None type for words."""
     from unittest.mock import MagicMock
-    import pytest
     clip = MagicMock()
     with pytest.raises(TypeError):
         visual_effects.make_text_mask_sequence(clip, words=None)
 
+def test_apply_letterbox_extreme_fractions():
+    class ExtremeClip(MagicMock):
+        @property
+        def size(self):
+            return (100, 100)
+        def fl(self, func, *args, **kwargs):
+            return func(lambda t: __import__('numpy').zeros((100, 100, 3), dtype=__import__('numpy').uint8), 0.0)
+
+    clip = ExtremeClip()
+    res1 = visual_effects.apply_letterbox(clip, bar_fraction=1.5)
+    assert res1 is not clip
+    assert hasattr(res1, 'fl')
+    assert hasattr(res1, 'fl')
+
+    res2 = visual_effects.apply_letterbox(clip, bar_fraction=-0.5)
+    assert res2 is not clip
+    assert hasattr(res2, 'fl')
+    assert hasattr(res2, 'fl')
+
+def test_make_camera_shake_zero_frames():
+    class ShakeClip(MagicMock):
+        @property
+        def size(self):
+            return (1920, 1080)
+        @property
+        def fps(self):
+            return 30.0
+        def fl(self, func, *args, **kwargs):
+            # simulate 1 frame
+            return func(lambda t: np.ones((1080, 1920, 3), dtype=__import__('numpy').uint8)*255, 0.0)
+
+    clip = ShakeClip()
+    # zero frames
+    res1 = visual_effects.make_camera_shake(clip, intensity=-0.1, shake_frames=0)
+    assert res1 is clip
+
+def test_make_zoom_punch_negative_zoom():
+    class ZoomClip(MagicMock):
+        @property
+        def size(self):
+            return (1920, 1080)
+        @property
+        def duration(self):
+            return 2.0
+        def fl(self, func, *args, **kwargs):
+            return func(lambda t: __import__('numpy').zeros((1080, 1920, 3), dtype=__import__('numpy').uint8), 1.0)
+
+    clip = ZoomClip()
+    res1 = visual_effects.make_zoom_punch(clip, zoom_start=-1.0, zoom_end=0.0)
+    assert res1 is not clip
+    assert hasattr(res1, 'fl')
+
+def test_make_watermark_overlay_invalid_opacity(monkeypatch):
+
+    # Mock font rendering
+    mock_font = MagicMock()
+    monkeypatch.setattr(visual_effects, '_get_pil_font', lambda s: mock_font)
+    monkeypatch.setattr(visual_effects, '_measure_text', lambda t, f: (50, 20))
+
+    class WatermarkClip(MagicMock):
+        @property
+        def size(self):
+            return (1920, 1080)
+        def fl(self, func, *args, **kwargs):
+            return func(lambda t: __import__('numpy').zeros((1080, 1920, 3), dtype=__import__('numpy').uint8), 0.0)
+
+    clip = WatermarkClip()
+    res1 = visual_effects.make_watermark_overlay(clip, text="test", opacity=2.0)
+    assert res1 is not clip
+    assert hasattr(res1, 'fl')
+
+    res2 = visual_effects.make_watermark_overlay(clip, text="test", opacity=-1.0)
+    assert res2 is not clip
+    assert hasattr(res2, 'fl')
+
+def test_make_blend_text_overlay_empty_text(monkeypatch):
+
+    # Mock PIL imports since tests run in mocked cv2/numpy often and we want to test pure logic
+    mock_font = MagicMock()
+    monkeypatch.setattr(visual_effects, '_get_pil_font', lambda s: mock_font)
+    monkeypatch.setattr(visual_effects, '_measure_text', lambda t, f: (0, 0))
+
+    class BlendClip(MagicMock):
+        @property
+        def size(self):
+            return (1920, 1080)
+        def fl(self, func, *args, **kwargs):
+            return func(lambda t: __import__('numpy').zeros((1080, 1920, 3), dtype=__import__('numpy').uint8), 0.0)
+
+    clip = BlendClip()
+    res1 = visual_effects.make_blend_text_overlay(clip, text="", font_size_frac=-0.5)
+    assert res1 is not clip
+    assert hasattr(res1, 'fl')
 def test_make_zoom_punch_zero_duration_edge():
     """Test make_zoom_punch with edge case zoom_start and zoom_end values."""
     mock_clip = MagicMock()
