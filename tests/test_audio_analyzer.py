@@ -259,3 +259,140 @@ def test_build_cut_schedule_drop_phase_no_forced_zero():
     assert cut_points[0].time >= 0.0
     for cp in cut_points:
         assert cp.phase == "drop"
+
+def test_energy_in_range_normal():
+    """Test _energy_in_range returns the correct subset of energy values."""
+    from audio_analyzer import _energy_in_range
+    import numpy as np
+    energy = np.array([0.1, 0.5, 0.9, 0.4])
+    times = np.array([0.0, 1.0, 2.0, 3.0])
+
+    # Should include index 1 and 2 (times 1.0 and 2.0)
+    result = _energy_in_range(energy, times, 0.5, 2.5)
+    assert np.array_equal(result, np.array([0.5, 0.9]))
+
+def test_energy_in_range_empty():
+    """Test _energy_in_range returns [0.0] if no times fall in the given range."""
+    from audio_analyzer import _energy_in_range
+    import numpy as np
+    energy = np.array([0.1, 0.5, 0.9, 0.4])
+    times = np.array([0.0, 1.0, 2.0, 3.0])
+
+    # Range where no time exists
+    result = _energy_in_range(energy, times, 4.0, 5.0)
+    assert np.array_equal(result, np.array([0.0]))
+
+def test_song_section_repr():
+    """Test the __repr__ method of SongSection."""
+    from audio_analyzer import SongSection
+    section = SongSection(start=1.5, end=5.5, phase="drop", energy=0.85)
+    rep = repr(section)
+    assert "SongSection" in rep
+    assert "drop" in rep
+    assert "1.50" in rep
+    assert "5.50" in rep
+    assert "0.85" in rep
+
+def test_cut_point_repr():
+    """Test the __repr__ method of CutPoint."""
+    from audio_analyzer import CutPoint
+    cp_normal = CutPoint(time=2.34, beat_index=1, beat_type="hard", phase="drop", clip_dur_hint=1.23, is_forced=False)
+    rep_normal = repr(cp_normal)
+    assert "CutPoint" in rep_normal
+    assert "2.34" in rep_normal
+    assert "drop" in rep_normal
+    assert "hard" in rep_normal
+    assert "1.23" in rep_normal
+    assert "[FORCED]" not in rep_normal
+
+    cp_forced = CutPoint(time=4.56, beat_index=2, beat_type="soft", phase="verse", clip_dur_hint=2.34, is_forced=True)
+    rep_forced = repr(cp_forced)
+    assert "[FORCED]" in rep_forced
+
+    cp_no_phase = CutPoint(time=5.0, beat_index=3, beat_type="soft", phase=None, clip_dur_hint=0.5, is_forced=False)
+    rep_no_phase = repr(cp_no_phase)
+    assert "?" in rep_no_phase
+
+def test_extract_beats_no_onset():
+    """Test extract_beats when there are fewer onset envelope values than beat frames,
+    ensuring it handles empty beat_strengths safely."""
+    with patch("audio_analyzer.librosa") as mock_librosa, patch("audio_analyzer.np") as mock_np:
+        import audio_analyzer
+        import numpy as np
+
+        mock_librosa.load = MagicMock(return_value=(np.zeros(22050), 22050))
+        # Beat track returns frames [10, 20]
+        mock_librosa.beat.beat_track = MagicMock(return_value=(120.0, [10, 20]))
+        mock_librosa.frames_to_time = MagicMock(return_value=[0.5, 1.0])
+
+        # Onset env is too short, so valid_beat_frames will be empty and beat_strengths is empty
+        mock_librosa.onset.onset_strength = MagicMock(return_value=np.array([0.1]*5))
+
+        mock_np.atleast_1d = MagicMock(return_value=[120.0])
+
+        # Mock percentile and argmax just in case, though they shouldn't be called
+        mock_np.percentile = MagicMock(return_value=0.5)
+        mock_np.argmax = MagicMock(return_value=0)
+
+        with patch.object(audio_analyzer, 'librosa', mock_librosa), patch.object(audio_analyzer, 'np', mock_np):
+            beat_times, hard_beat_times, main_drop_time = audio_analyzer.extract_beats("dummy.mp3")
+
+            assert beat_times == [0.5, 1.0]
+            assert hard_beat_times == []
+            assert main_drop_time is None
+
+def test_detect_song_sections_full():
+    """Test detect_song_sections logic including bridge and verse gap filling."""
+    import audio_analyzer
+    import numpy as np
+
+    with patch("audio_analyzer.librosa") as mock_librosa:
+
+        # Audio duration is 100s
+        mock_librosa.load = MagicMock(return_value=(np.zeros(22050), 22050))
+        mock_librosa.get_duration = MagicMock(return_value=100.0)
+
+        # Create dummy RMS times up to 100s with 0.1 hop
+        times = np.arange(0, 100.1, 0.1)
+        mock_librosa.frames_to_time = MagicMock(return_value=times)
+
+        # We need mock RMS and onset arrays the same length
+        # Make the energy high around 40s to trigger a drop, and high around 70s for a second drop
+        rms = np.full(len(times), 0.3)
+        # Drop 1: 39s to 45s
+        mask1 = (times >= 39.0) & (times <= 45.0)
+        rms[mask1] = 0.9
+
+        # Drop 2: 70s to 75s
+        mask2 = (times >= 70.0) & (times <= 75.0)
+        rms[mask2] = 0.85
+
+        mock_librosa.feature.rms = MagicMock(return_value=[rms])
+        mock_librosa.onset.onset_strength = MagicMock(return_value=np.zeros(len(times)))
+
+        # main_drop_time = 40.0
+        sections = audio_analyzer.detect_song_sections("dummy.mp3", main_drop_time=40.0)
+
+        # Verify that we have some filled sections
+        phases = [s.phase for s in sections]
+
+        # Check that bridge and verse were generated to fill the gaps
+        assert "intro" in phases
+        assert "drop" in phases
+        assert "outro" in phases
+
+        # We should have a verse before the first buildup/drop (between intro and buildup)
+        assert "verse" in phases
+
+        # We should have a bridge after the first drop (between drop1 and drop2)
+        assert "bridge" in phases
+
+def test_extract_beats_invalid_format():
+    """Test extract_beats with an invalid or unreadable audio format."""
+    import pytest
+    with patch("audio_analyzer.librosa.load") as mock_load:
+        # Simulate librosa failing to read a file
+        mock_load.side_effect = Exception("Format not recognized")
+        import audio_analyzer
+        with pytest.raises(Exception, match="Format not recognized"):
+            audio_analyzer.extract_beats("invalid_file.txt")
