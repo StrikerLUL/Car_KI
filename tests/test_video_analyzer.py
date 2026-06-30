@@ -420,3 +420,93 @@ def test_find_highlights_gap_filling(tmp_path, monkeypatch):
     for i in range(len(clips)):
         for j in range(i + 1, len(clips)):
             assert abs(clips[i].timestamp - clips[j].timestamp) >= 1.0
+
+def test_compute_optical_flow_gpu_empty_fallback():
+    mock_cap = MagicMock()
+    mock_cap.read.return_value = (False, None)
+    with patch.object(video_analyzer, 'cv2') as mock_cv2:
+        result = video_analyzer._compute_optical_flow_gpu(mock_cap, total_frames=10, fps=30.0)
+        assert result == []
+
+def test_compute_optical_flow_gpu_success():
+    mock_cap = MagicMock()
+    frame1 = np.zeros((100, 100, 3), dtype=np.uint8)
+    frame2 = np.ones((100, 100, 3), dtype=np.uint8) * 255
+    read_side_effect = [(True, frame1), (True, frame2), (False, None)]
+    mock_cap.read.side_effect = read_side_effect
+
+    with patch.object(video_analyzer, 'cv2') as mock_cv2:
+        mock_flow_gpu = MagicMock()
+        mock_flow_gpu.calc.return_value = MagicMock()
+        mock_flow_gpu.calc.return_value.download.return_value = np.zeros((50, 50, 2), dtype=np.float32)
+        mock_cv2.cuda.FarnebackOpticalFlow.create.return_value = mock_flow_gpu
+        mock_cv2.cartToPolar.return_value = (np.ones((50, 50), dtype=np.float32), None)
+
+        # Ensure that other cv2 operations don't fail
+        mock_cv2.resize.side_effect = lambda img, *args, **kwargs: np.zeros((50, 50, 3), dtype=np.uint8) if len(img.shape) == 3 else np.zeros((50, 50), dtype=np.uint8)
+        mock_cv2.cvtColor.side_effect = lambda img, *args, **kwargs: np.zeros((50, 50), dtype=np.uint8)
+
+        mock_cuda_GpuMat = MagicMock()
+        mock_cv2.cuda_GpuMat.return_value = mock_cuda_GpuMat
+
+        result = video_analyzer._compute_optical_flow_gpu(mock_cap, total_frames=60, fps=30.0, sample_interval=1.0)
+
+        assert isinstance(result, list)
+        assert len(result) >= 1
+        assert "motion_score" in result[0]
+        assert "drift_score" in result[0]
+        assert "cam_type" in result[0]
+
+def test_compute_optical_flow_normalization():
+    mock_cap = MagicMock()
+    mock_raw_data = [
+        {"motion_score": 10.0, "drift_score": 5.0, "cam_type": "helmet"},
+        {"motion_score": 20.0, "drift_score": 10.0, "cam_type": "external"},
+        {"motion_score": 5.0, "drift_score": 2.5, "cam_type": "helmet"}
+    ]
+
+    with patch.object(video_analyzer, '_CUDA_AVAILABLE', False):
+        with patch.object(video_analyzer, '_compute_optical_flow_cpu', return_value=mock_raw_data):
+            result = video_analyzer._compute_optical_flow(mock_cap, total_frames=10, fps=30.0)
+
+            assert len(result) == 3
+            # Percentile 95 logic
+            m_scores = [d["motion_score"] for d in result]
+            d_scores = [d["drift_score"] for d in result]
+            assert all(0.0 <= score <= 1.0 for score in m_scores)
+            assert all(0.0 <= score <= 1.0 for score in d_scores)
+
+def test_analyze_audio_valid_normalization():
+    mock_clip = MagicMock()
+    mock_audio = MagicMock()
+    mock_clip.audio = mock_audio
+
+    with patch.object(video_analyzer, 'VideoFileClip', return_value=mock_clip):
+        with patch.object(video_analyzer, 'librosa') as mock_librosa:
+            mock_librosa.load.return_value = (np.zeros(22050), 22050)
+            mock_librosa.feature.rms.return_value = np.array([[0.1, 0.5, 1.0, 0.2]])
+            mock_librosa.frames_to_time.return_value = np.array([0.0, 1.0, 2.0, 3.0])
+
+            with patch('os.remove'):
+                result = video_analyzer._analyze_audio("dummy.mp4", total_frames=10, fps=30.0)
+
+                assert len(result) == 10
+                assert np.max(result) <= 1.0
+                assert np.min(result) >= 0.0
+
+def test_analyze_telemetry_valid_normalization():
+    import pandas as pd
+
+    mock_df = pd.DataFrame({
+        "Time": [0.0, 1.0, 2.0, 3.0],
+        "G_Lat": [0.0, 0.5, 1.0, 0.2],
+        "G_Long": [0.0, -0.5, -1.0, -0.2]
+    })
+
+    with patch('os.path.exists', return_value=True):
+        with patch('pandas.read_csv', return_value=mock_df):
+            result = video_analyzer._analyze_telemetry("dummy.mp4", total_frames=10, fps=30.0)
+
+            assert len(result) == 10
+            assert np.max(result) <= 1.0
+            assert np.min(result) >= 0.0
