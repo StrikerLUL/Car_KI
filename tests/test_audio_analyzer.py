@@ -259,3 +259,137 @@ def test_build_cut_schedule_drop_phase_no_forced_zero():
     assert cut_points[0].time >= 0.0
     for cp in cut_points:
         assert cp.phase == "drop"
+
+def test_detect_song_sections_no_main_drop():
+    """Test detect_song_sections when main_drop_time is None."""
+    import audio_analyzer
+
+    mock_librosa = MagicMock()
+    # Dummy audio data, length 10
+    mock_librosa.load.return_value = (np.ones(220500), 22050)
+    mock_librosa.get_duration.return_value = 10.0
+    mock_librosa.feature.rms.return_value = [np.ones(50)]
+    mock_librosa.frames_to_time.return_value = np.arange(50.0)
+    # Give uniform onset strength
+    mock_librosa.onset.onset_strength.return_value = np.ones(50)
+
+    with patch.object(audio_analyzer, 'librosa', mock_librosa):
+        with patch.object(audio_analyzer.np, 'convolve', return_value=np.ones(50)):
+            sections = audio_analyzer.detect_song_sections("dummy.mp3", main_drop_time=None)
+
+        # When no main drop, sections are inferred purely from general intro/outro logic + leftover
+        assert len(sections) > 0
+        phases = [s.phase for s in sections]
+        # Should have intro, maybe some verse/bridge, outro
+        assert "intro" in phases
+        assert "outro" in phases
+
+def test_detect_song_sections_with_drops_and_buildup():
+    """Test detect_song_sections logic for drops and buildups with simulated energy peaks."""
+    import audio_analyzer
+
+    mock_librosa = MagicMock()
+    # Mock for 30s song
+    mock_librosa.load.return_value = (np.ones(22050 * 30), 22050)
+    mock_librosa.get_duration.return_value = 30.0
+
+    # 50 frames
+    mock_librosa.feature.rms.return_value = [np.ones(50)]
+    mock_librosa.frames_to_time.return_value = np.arange(50.0)
+
+    # Simulate an energy spike at t=15 for the main drop and another at t=25
+    energy = np.ones(50) * 0.1
+    energy[13:15] = 0.5  # Buildup
+    energy[15:20] = 0.9  # Main drop
+    energy[24:25] = 0.5  # Buildup 2
+    energy[25:28] = 0.9  # Second drop
+
+    mock_librosa.onset.onset_strength.return_value = energy
+
+    with patch.object(audio_analyzer, 'librosa', mock_librosa):
+        with patch.object(audio_analyzer.np, 'convolve', return_value=energy):
+            sections = audio_analyzer.detect_song_sections("dummy.mp3", main_drop_time=15.0)
+
+        assert len(sections) > 0
+        phases = [s.phase for s in sections]
+
+        # Verify that buildups and drops are successfully identified
+        assert "buildup" in phases
+        assert "drop" in phases
+
+        drops = [s for s in sections if s.phase == "drop"]
+        assert len(drops) >= 1
+
+        # Verify first drop starts around 15.0 (main_drop_time)
+        assert abs(drops[0].start - 15.0) <= 2.0
+
+def test_energy_in_range_standard():
+    """Test _energy_in_range with standard inputs."""
+    import audio_analyzer
+    import numpy as np
+
+    energy = np.array([0.1, 0.5, 0.9, 0.5, 0.1])
+    times = np.array([0.0, 1.0, 2.0, 3.0, 4.0])
+
+    # Range [1.0, 3.0] -> values in range [1.0, 3.0) -> times[1], times[2] -> energies [0.5, 0.9]
+    result = audio_analyzer._energy_in_range(energy, times, 1.0, 3.0)
+    assert np.array_equal(result, np.array([0.5, 0.9]))
+
+def test_energy_in_range_out_of_bounds_start():
+    """Test _energy_in_range when start is out of bounds."""
+    import audio_analyzer
+    import numpy as np
+
+    energy = np.array([0.1, 0.5, 0.9, 0.5, 0.1])
+    times = np.array([0.0, 1.0, 2.0, 3.0, 4.0])
+
+    # Range [5.0, 6.0] -> should return 0.0
+    result = audio_analyzer._energy_in_range(energy, times, 5.0, 6.0)
+    import numpy as np
+    assert np.array_equal(result, np.array([0.0]))
+
+def test_energy_in_range_no_elements_in_range():
+    """Test _energy_in_range when range is so tight no elements are inside."""
+    import audio_analyzer
+    import numpy as np
+
+    energy = np.array([0.1, 0.5, 0.9, 0.5, 0.1])
+    times = np.array([0.0, 1.0, 2.0, 3.0, 4.0])
+
+    # Range [1.1, 1.9] -> should return 0.0 because times[1] is 1.0 and times[2] is 2.0
+    result = audio_analyzer._energy_in_range(energy, times, 1.1, 1.9)
+    import numpy as np
+    assert np.array_equal(result, np.array([0.0]))
+
+
+def test_detect_song_sections_wrong_file_format():
+    """Test detect_song_sections with a wrong file format (which raises an exception during load)."""
+    import audio_analyzer
+    import pytest
+    from unittest.mock import patch, MagicMock
+
+    mock_librosa = MagicMock()
+    mock_librosa.load.side_effect = Exception("Invalid file format")
+
+    with patch.object(audio_analyzer, 'librosa', mock_librosa):
+        with pytest.raises(Exception, match="Invalid file format"):
+            audio_analyzer.detect_song_sections("wrong_format.txt")
+
+def test_extract_beats_empty_audio_array():
+    """Test extract_beats when the audio array is completely empty."""
+    import audio_analyzer
+    import numpy as np
+    import pytest
+    from unittest.mock import patch, MagicMock
+
+    mock_librosa = MagicMock()
+    mock_librosa.load.return_value = (np.array([]), 22050)
+    mock_librosa.beat.beat_track.return_value = (0.0, np.array([]))
+    mock_librosa.frames_to_time.return_value = np.array([])
+    mock_librosa.onset.onset_strength.return_value = np.array([])
+
+    with patch.object(audio_analyzer, 'librosa', mock_librosa):
+        beat_times, hard_beat_times, main_drop_time = audio_analyzer.extract_beats("empty.mp3")
+        assert beat_times == []
+        assert hard_beat_times == []
+        assert main_drop_time is None
