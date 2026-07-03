@@ -259,3 +259,68 @@ def test_build_cut_schedule_drop_phase_no_forced_zero():
     assert cut_points[0].time >= 0.0
     for cp in cut_points:
         assert cp.phase == "drop"
+
+def test_energy_in_range_out_of_bounds():
+    import audio_analyzer
+    import numpy as np
+
+    energy = np.array([0.5, 0.6, 0.7])
+    times = np.array([1.0, 2.0, 3.0])
+
+    # Test completely out of bounds range
+    res1 = audio_analyzer._energy_in_range(energy, times, 4.0, 5.0)
+    assert np.array_equal(res1, np.array([0.0]))
+
+    # Test inverted range (start > end)
+    res2 = audio_analyzer._energy_in_range(energy, times, 3.0, 1.0)
+    assert np.array_equal(res2, np.array([0.0]))
+
+def test_song_section_repr():
+    from audio_analyzer import SongSection
+    section = SongSection(start=1.234, end=5.678, phase="intro", energy=0.891)
+    rep = repr(section)
+    assert "intro" in rep
+    assert "1.23" in rep
+    assert "5.68" in rep
+    assert "0.89" in rep
+
+def test_cutpoint_repr():
+    from audio_analyzer import CutPoint
+    cp = CutPoint(time=2.345, beat_index=5, beat_type="hard", phase="drop", clip_dur_hint=1.5, is_forced=True)
+    rep = repr(cp)
+    assert "2.35" in rep
+    assert "drop" in rep
+    assert "hard" in rep
+    assert "FORCED" in rep
+
+    cp2 = CutPoint(time=2.345, beat_index=5, beat_type="hard", phase=None, clip_dur_hint=1.5, is_forced=False)
+    rep2 = repr(cp2)
+    assert "?" in rep2
+    assert "FORCED" not in rep2
+
+def test_detect_song_sections_short_file():
+    import audio_analyzer
+    import numpy as np
+    from unittest.mock import patch, MagicMock
+
+    mock_librosa = MagicMock()
+    # Provide enough samples so frames_to_time has a length > 30 for np.ones(30) to work correctly
+    mock_librosa.load.return_value = (np.array([0.1]*200000), 22050)
+    mock_librosa.get_duration.return_value = 10.0
+    mock_librosa.feature.rms.return_value = np.array([[0.1]*100])
+    mock_librosa.frames_to_time.return_value = np.array([0.1 * i for i in range(100)])
+    mock_librosa.onset.onset_strength.return_value = np.array([0.1]*100)
+
+    with patch.object(audio_analyzer, 'librosa', mock_librosa):
+        sections = audio_analyzer.detect_song_sections("dummy.mp3")
+        assert isinstance(sections, list)
+
+def test_extract_beats_exception():
+    import audio_analyzer
+    from unittest.mock import patch
+
+    with patch.object(audio_analyzer, 'librosa') as mock_librosa:
+        mock_librosa.load.side_effect = RuntimeError("Simulated load error")
+        import pytest
+        with pytest.raises(RuntimeError, match="Simulated load error"):
+            audio_analyzer.extract_beats("broken.mp3")
