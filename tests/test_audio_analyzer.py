@@ -259,3 +259,89 @@ def test_build_cut_schedule_drop_phase_no_forced_zero():
     assert cut_points[0].time >= 0.0
     for cp in cut_points:
         assert cp.phase == "drop"
+
+def test_extract_beats_no_beats():
+    """Test extract_beats when no beats are found."""
+    import audio_analyzer
+    import numpy as np
+
+    with patch("audio_analyzer.librosa") as mock_librosa, patch("audio_analyzer.np") as mock_np:
+        mock_librosa.load.return_value = (np.zeros(22050), 22050)
+        mock_librosa.beat.beat_track.return_value = (120.0, np.array([]))
+        mock_librosa.frames_to_time.return_value = np.array([])
+        mock_librosa.onset.onset_strength.return_value = np.array([])
+        mock_np.atleast_1d.return_value = np.array([120.0])
+
+        beat_times, hard_beat_times, main_drop_time = audio_analyzer.extract_beats("dummy.mp3")
+        assert beat_times == []
+        assert hard_beat_times == []
+        assert main_drop_time is None
+
+def test_detect_song_sections_multiple_drops():
+    """Test detect_song_sections correctly identifies multiple drops."""
+    import audio_analyzer
+    import numpy as np
+
+    with patch("audio_analyzer.librosa") as mock_librosa:
+        rms_times = np.arange(0, 60, 0.1)
+        macro_energy = np.ones(len(rms_times)) * 0.1
+
+        idx_main = np.searchsorted(rms_times, 15.0)
+        macro_energy[idx_main-10:idx_main+30] = 0.9
+
+        idx_second = np.searchsorted(rms_times, 40.0)
+        macro_energy[idx_second-10:idx_second+30] = 0.8
+
+        mock_librosa.load.return_value = (np.zeros(22050), 22050)
+        mock_librosa.get_duration.return_value = 60.0
+
+        mock_librosa.feature.rms.return_value = np.array([np.ones(len(rms_times)) * 0.1])
+        mock_librosa.frames_to_time.return_value = rms_times
+        mock_librosa.onset.onset_strength.return_value = macro_energy
+
+        with patch.object(audio_analyzer, 'np', wraps=np) as mock_np:
+            mock_np.median.return_value = 0.2
+            # Simulate high_thresh to be lower than peak
+            mock_np.percentile.side_effect = lambda x, p: 0.7 if p == 75 else (0.1 if p == 30 else np.percentile(x, p))
+            mock_np.convolve.return_value = macro_energy
+
+            sections = audio_analyzer.detect_song_sections("dummy.mp3", main_drop_time=15.0)
+
+            drop_count = sum(1 for s in sections if s.phase == 'drop')
+            assert drop_count >= 2
+
+def test_build_cut_schedule_buildup_stride():
+    """Test build_cut_schedule logic for buildup phase strides."""
+    from audio_analyzer import build_cut_schedule, SongSection
+    sections = [SongSection(0.0, 6.0, "buildup", 0.8)]
+    beat_times = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+
+    cut_points = build_cut_schedule(beat_times, sections, hard_beat_times=[], audio_duration=6.0)
+
+    assert len(cut_points) > 0
+    for cp in cut_points:
+        assert cp.phase == "buildup"
+
+def test_extract_beats_invalid_file_type():
+    """Test extract_beats handling incorrect file type."""
+    from audio_analyzer import extract_beats
+    from unittest.mock import patch
+    import librosa
+
+    with patch("audio_analyzer.librosa.load") as mock_load:
+        # Instead of dealing with librosa mock namespaces, use a standard Exception for the test logic wrapper
+        mock_load.side_effect = Exception("Invalid audio format")
+
+        with pytest.raises(Exception, match="Invalid audio format"):
+            extract_beats("dummy.txt")
+
+def test_extract_beats_empty_path():
+    """Test extract_beats handling an empty string as a file path."""
+    from audio_analyzer import extract_beats
+    from unittest.mock import patch
+
+    with patch("audio_analyzer.librosa.load") as mock_load:
+        mock_load.side_effect = FileNotFoundError("File not found")
+
+        with pytest.raises(FileNotFoundError):
+            extract_beats("")
