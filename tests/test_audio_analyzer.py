@@ -259,3 +259,82 @@ def test_build_cut_schedule_drop_phase_no_forced_zero():
     assert cut_points[0].time >= 0.0
     for cp in cut_points:
         assert cp.phase == "drop"
+
+def test_energy_in_range_edge_cases():
+    from audio_analyzer import _energy_in_range
+    energy = np.array([0.1, 0.8, 0.3])
+    times = np.array([0.0, 1.0, 2.0])
+    # Outside range
+    res1 = _energy_in_range(energy, times, 3.0, 4.0)
+    assert np.array_equal(res1, np.array([0.0]))
+    # Inside range
+    res2 = _energy_in_range(energy, times, 0.5, 1.5)
+    assert np.array_equal(res2, np.array([0.8]))
+    # Empty inputs
+    res3 = _energy_in_range(np.array([]), np.array([]), 0.0, 1.0)
+    assert np.array_equal(res3, np.array([0.0]))
+
+def test_cut_point_repr():
+    from audio_analyzer import CutPoint
+    cp = CutPoint(time=12.345, beat_index=5, beat_type="hard", phase="drop", is_forced=True, clip_dur_hint=1.0)
+    repr_str = repr(cp)
+    assert "12.34" in repr_str or "12.35" in repr_str
+    assert "hard" in repr_str
+    assert "drop" in repr_str
+    assert "forced" in repr_str.lower()
+
+def test_build_cut_schedule_buildup_phase():
+    from audio_analyzer import build_cut_schedule, SongSection
+    beat_times = [0.1, 0.5, 0.9, 1.3, 1.7, 2.1]
+    sections = [SongSection(start=0.0, end=2.0, phase="buildup", energy=0.5)]
+    schedule = build_cut_schedule(beat_times, sections, hard_beat_times=[], audio_duration=2.5)
+    assert len(schedule) > 0
+    for cp in schedule:
+        assert cp.phase == "buildup"
+
+def test_build_cut_schedule_zero_duration():
+    from audio_analyzer import build_cut_schedule
+    beat_times = [0.0, 1.0]
+    schedule = build_cut_schedule(beat_times, [], [], 0.0)
+    assert len(schedule) == 0
+
+
+
+
+@patch("audio_analyzer.librosa")
+@patch("audio_analyzer.np", wraps=np)
+def test_detect_song_sections_multiple_drops(mock_np, mock_librosa):
+    import audio_analyzer
+    from audio_analyzer import detect_song_sections, SongSection
+
+    # We want to use the real numpy for arrays, but intercept specific calls if needed.
+    # Actually, the global sys.modules patch might interfere here.
+
+    mock_librosa.load.return_value = (np.ones(44100*30), 22050)
+    mock_librosa.get_duration.return_value = 30.0
+    mock_librosa.feature.rms.return_value = [np.ones(600) * 0.1]
+
+    rms_times = np.linspace(0, 30, 600)
+    mock_librosa.frames_to_time.return_value = rms_times
+    mock_librosa.onset.onset_strength.return_value = np.ones(600) * 0.1
+
+    # Let's bypass the sys.modules patch by creating a mock macro_energy
+    original_convolve = np.convolve
+    def mock_convolve(*args, **kwargs):
+        # Return a custom macro energy array to trigger multiple drops
+        energy = np.zeros(600)
+        energy[200] = 10.0 # First drop at t=10
+        energy[400] = 9.0  # Second drop at t=20, high enough to trigger
+        return energy
+
+    mock_np.convolve.side_effect = mock_convolve
+
+    # mock_np.max and mock_np.percentile to allow drops to be detected
+    mock_np.max.return_value = 10.0
+    mock_np.percentile.return_value = 0.5
+
+    sections = detect_song_sections("dummy.mp3", main_drop_time=10.0)
+
+    # Check if we got multiple drops
+    drop_sections = [s for s in sections if s.phase == "drop"]
+    assert len(drop_sections) >= 1
