@@ -420,3 +420,27 @@ def test_find_highlights_gap_filling(tmp_path, monkeypatch):
     for i in range(len(clips)):
         for j in range(i + 1, len(clips)):
             assert abs(clips[i].timestamp - clips[j].timestamp) >= 1.0
+
+def test_classify_clip_extreme_values():
+    tag = video_analyzer._classify_clip(score=100.0, motion_score=100.0, drift_score=100.0, audio_score=100.0, vehicle_count=100.0, cam_type="external")
+    assert tag == "drift"
+
+def test_classify_clip_negative_values():
+    tag = video_analyzer._classify_clip(score=-1.0, motion_score=-1.0, drift_score=-1.0, audio_score=-1.0, vehicle_count=-1.0, cam_type="external")
+    assert tag == "calm"
+
+def test_compute_optical_flow_cpu_empty_video():
+    from unittest.mock import MagicMock
+    mock_cap = MagicMock()
+    mock_cap.read.return_value = (False, None)
+    res = video_analyzer._compute_optical_flow_cpu(mock_cap, total_frames=10, fps=30.0)
+    assert res == []
+
+def test_analyze_audio_wrong_format():
+    import numpy as np
+    res = video_analyzer._analyze_audio("fake_video_does_not_exist.mp4", total_frames=10, fps=30.0)
+    assert np.array_equal(res, np.zeros(10, dtype=np.float32))
+
+def test_classify_clip_cam_type_none():
+    tag = video_analyzer._classify_clip(score=0.8, motion_score=0.2, drift_score=0.1, audio_score=0.6, vehicle_count=1.0, cam_type=None)
+    assert tag == "straight"
