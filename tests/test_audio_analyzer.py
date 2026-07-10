@@ -16,7 +16,7 @@ np.mean.side_effect = lambda x: sum(x) / len(x) if x else 0.0
 
 from audio_analyzer import suggest_trend_preset, SongSection, build_cut_schedule, CutPoint
 import pytest
-from audio_analyzer import suggest_trend_preset, SongSection, build_cut_schedule, extract_beats
+from audio_analyzer import suggest_trend_preset, SongSection, build_cut_schedule, extract_beats, detect_song_sections
 
 def test_suggest_trend_preset_empty_beats():
     """Test that empty beat_times returns 'storytime'."""
@@ -153,7 +153,7 @@ def test_extract_beats_empty_audio():
         mock_librosa.onset.onset_strength.return_value = np.array([])
         mock_np.atleast_1d.return_value = [120.0]
 
-        beat_times, hard_beat_times, main_drop_time = audio_analyzer.extract_beats("dummy.mp3")
+        beat_times, hard_beat_times, main_drop_time = extract_beats("dummy.mp3")
 
         assert beat_times == []
         assert hard_beat_times == []
@@ -219,7 +219,7 @@ def test_extract_beats_no_hard_beats():
         mock_np.argmax = MagicMock(return_value=0)
 
         with patch.object(audio_analyzer, 'librosa', mock_librosa), patch.object(audio_analyzer, 'np', mock_np):
-            beat_times, hard_beat_times, main_drop_time = audio_analyzer.extract_beats("dummy.mp3")
+            beat_times, hard_beat_times, main_drop_time = extract_beats("dummy.mp3")
 
             assert beat_times == [0.5, 1.0]
             assert hard_beat_times == []
@@ -259,3 +259,82 @@ def test_build_cut_schedule_drop_phase_no_forced_zero():
     assert cut_points[0].time >= 0.0
     for cp in cut_points:
         assert cp.phase == "drop"
+
+def test_extract_beats_no_beats(mocker):
+    """Test extract_beats gracefully handles audio with no detectable beats."""
+    mocker.patch('audio_analyzer.librosa.load', return_value=(np.zeros(20000), 22050))
+    mocker.patch('audio_analyzer.librosa.beat.beat_track', return_value=(np.array([120.0]), np.array([], dtype=int)))
+    mocker.patch('audio_analyzer.librosa.onset.onset_strength', return_value=np.zeros(20000))
+
+    beat_times, hard_beat_times, main_drop_time = extract_beats("dummy.mp3")
+
+    assert beat_times == []
+    assert hard_beat_times == []
+    assert main_drop_time is None
+
+def test_suggest_trend_preset_bpm_and_energy_overrides():
+    """Test suggest_trend_preset logic for BPM and average energy thresholds."""
+    from audio_analyzer import SongSection
+    sections_high_energy = [SongSection(start=0, end=10, phase="drop", energy=0.9)]
+    sections_low_energy = [SongSection(start=0, end=10, phase="verse", energy=0.2)]
+
+    # High BPM > 132 -> fast_meme_cut (overrides energy)
+    beat_times_fast = list(np.linspace(0, 10, 30)) # 180 BPM
+    assert suggest_trend_preset(beat_times_fast, sections_low_energy) == "fast_meme_cut"
+    assert suggest_trend_preset(beat_times_fast, sections_high_energy) == "fast_meme_cut"
+
+    # Slow BPM < 100
+    beat_times_slow = list(np.linspace(0, 10, 15)) # 90 BPM
+
+    # Slow BPM, High energy -> motivation (energy > 0.75 overrides slow BPM)
+    assert suggest_trend_preset(beat_times_slow, sections_high_energy) == "motivation"
+
+    # Slow BPM, Low energy -> storytime
+    assert suggest_trend_preset(beat_times_slow, sections_low_energy) == "storytime"
+
+def test_detect_song_sections_edge_cases(mocker):
+    """Test detect_song_sections gracefully handles extremely short audio files where phases exceed duration."""
+    mocker.patch('audio_analyzer.librosa.load', return_value=(np.zeros(20000), 22050))
+    mocker.patch('audio_analyzer.librosa.get_duration', return_value=2.0)
+    mocker.patch('audio_analyzer.librosa.feature.rms', return_value=np.zeros((1, 100)))
+    mocker.patch('audio_analyzer.librosa.frames_to_time', return_value=np.linspace(0, 2.0, 100))
+    mocker.patch('audio_analyzer.librosa.onset.onset_strength', return_value=np.zeros(100))
+
+    sections = detect_song_sections("dummy.mp3")
+    assert len(sections) > 0
+
+
+def test_detect_song_sections_buildup_and_bridge(mocker):
+    """Test detect_song_sections can identify buildup and bridge phases using main_drop_time."""
+    sr = 22050
+    duration = 60.0
+    num_frames = 600
+
+    mocker.patch('audio_analyzer.librosa.load', return_value=(np.zeros(sr * 60), sr))
+    mocker.patch('audio_analyzer.librosa.get_duration', return_value=duration)
+
+    rms = np.zeros((1, num_frames))
+    rms[0, 100:200] = 0.5
+    rms[0, 200:300] = 1.0
+    rms[0, 300:400] = 0.2
+    rms[0, 400:500] = 0.9
+    mocker.patch('audio_analyzer.librosa.feature.rms', return_value=rms)
+
+    rms_times = np.linspace(0, 60.0, num_frames)
+    mocker.patch('audio_analyzer.librosa.frames_to_time', return_value=rms_times)
+
+    onset_env = np.zeros(num_frames)
+    onset_env[100:200] = 0.5
+    onset_env[200:300] = 1.0
+    onset_env[300:400] = 0.1
+    onset_env[400:500] = 1.0
+    mocker.patch('audio_analyzer.librosa.onset.onset_strength', return_value=onset_env)
+
+    main_drop_time = 22.0
+
+    sections = detect_song_sections("dummy.mp3", main_drop_time=main_drop_time)
+
+    phases = [s.phase for s in sections]
+    assert "buildup" in phases
+    assert "drop" in phases
+    assert "bridge" in phases
