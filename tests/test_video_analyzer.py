@@ -420,3 +420,85 @@ def test_find_highlights_gap_filling(tmp_path, monkeypatch):
     for i in range(len(clips)):
         for j in range(i + 1, len(clips)):
             assert abs(clips[i].timestamp - clips[j].timestamp) >= 1.0
+
+def test_compute_optical_flow_gpu_flow(monkeypatch):
+    """Test _compute_optical_flow_gpu success path with mocked cv2/CUDA."""
+    mock_cap = MagicMock()
+    # Provide two valid frames, then end of stream
+    mock_cap.read.side_effect = [
+        (True, np.zeros((10, 10, 3), dtype=np.uint8)),
+        (True, np.ones((10, 10, 3), dtype=np.uint8)),
+        (False, None)
+    ]
+
+    mock_cv2 = MagicMock()
+    mock_cv2.COLOR_BGR2GRAY = 6
+    mock_cv2.INTER_LINEAR = 1
+    mock_cv2.CAP_PROP_POS_FRAMES = 1
+
+    # Mock cv2 functions
+    mock_cv2.cvtColor.return_value = np.zeros((5, 5), dtype=np.uint8)
+    mock_cv2.resize.return_value = np.zeros((5, 5, 3), dtype=np.uint8)
+
+    # cartToPolar returns (magnitude, angle)
+    mock_cv2.cartToPolar.return_value = (np.zeros((5, 5), dtype=np.float32), None)
+
+    # Mock FarnebackOpticalFlow and gpu mat
+    mock_flow = MagicMock()
+    # The CPU downloaded flow must be (H, W, 2)
+    mock_flow.calc.return_value.download.return_value = np.zeros((5, 5, 2), dtype=np.float32)
+    mock_cv2.cuda.FarnebackOpticalFlow.create.return_value = mock_flow
+
+    # Mock GpuMat upload
+    mock_gpu_mat = MagicMock()
+    mock_cv2.cuda_GpuMat.return_value = mock_gpu_mat
+
+    monkeypatch.setattr(video_analyzer, 'cv2', mock_cv2)
+
+    # Provide sample_interval that avoids frames_to_skip=0
+    res = video_analyzer._compute_optical_flow_gpu(mock_cap, total_frames=10, fps=30.0, sample_interval=1.0/30.0)
+
+    assert len(res) == 1
+    assert "motion_score" in res[0]
+    assert "drift_score" in res[0]
+    assert "cam_type" in res[0]
+
+def test_compute_optical_flow_gpu_empty(monkeypatch):
+    """Test _compute_optical_flow_gpu with empty stream."""
+    mock_cap = MagicMock()
+    mock_cap.read.return_value = (False, None)
+
+    mock_cv2 = MagicMock()
+    monkeypatch.setattr(video_analyzer, 'cv2', mock_cv2)
+
+    res = video_analyzer._compute_optical_flow_gpu(mock_cap, 10, 30.0, 1.0)
+    assert res == []
+
+def test_run_yolo_batch_exception(monkeypatch):
+    """Test _run_yolo_batch fallback when model crashes."""
+    import video_analyzer
+    mock_model = MagicMock()
+    mock_model.predict.side_effect = Exception("YOLO crash")
+
+    frames = [np.zeros((10, 10, 3)), np.zeros((10, 10, 3))]
+
+    # Expect logging
+    res = video_analyzer._run_yolo_batch(mock_model, frames, [2, 3, 5, 7])
+
+    # Should return zeros for each frame
+    assert res == [0.0, 0.0]
+
+def test_find_highlights_empty_video(monkeypatch):
+    """Test find_highlights with a non-existent or empty video path."""
+    import video_analyzer
+
+    mock_cap = MagicMock()
+    mock_cap.isOpened.return_value = False
+    mock_cap.get.return_value = 0.0
+    monkeypatch.setattr(video_analyzer.cv2, 'VideoCapture', lambda x: mock_cap)
+
+    clips = video_analyzer.find_highlights("missing_video.mp4", num_clips=3)
+
+    assert len(clips) == 1
+    assert clips[0].timestamp == 0.0
+    assert clips[0].source == "missing_video.mp4"
