@@ -259,3 +259,78 @@ def test_build_cut_schedule_drop_phase_no_forced_zero():
     assert cut_points[0].time >= 0.0
     for cp in cut_points:
         assert cp.phase == "drop"
+
+def test_energy_in_range_empty():
+    """Test _energy_in_range with a time range that matches no times."""
+    import audio_analyzer
+    import numpy as np
+    energy = np.array([0.5, 0.8, 0.9])
+    times = np.array([1.0, 2.0, 3.0])
+    # Range [4.0, 5.0] has no matching times
+    result = audio_analyzer._energy_in_range(energy, times, 4.0, 5.0)
+    assert np.array_equal(result, np.array([0.0]))
+
+def test_suggest_trend_preset_zero_duration():
+    """Test suggest_trend_preset where the beat times result in a duration of 0.0."""
+    import audio_analyzer
+    # Dur is calculated as beat_times[-1] - beat_times[0]
+    beat_times = [5.0, 5.0, 5.0]
+    sections = [audio_analyzer.SongSection(0.0, 10.0, "verse", 0.5)]
+    # With dur=0, bpm falls back to 120. Avg energy is 0.5. Result should be 'storytime' or 'motivation' depending on logic
+    # (bpm 120, avg_energy 0.5) -> 'motivation' is default
+    assert audio_analyzer.suggest_trend_preset(beat_times, sections) == "motivation"
+
+def test_detect_song_sections_multiple_drops():
+    """Test detect_song_sections where multiple drop phases are identified."""
+    import audio_analyzer
+    import numpy as np
+    from unittest.mock import MagicMock, patch
+
+    mock_librosa = MagicMock()
+    mock_librosa.load.return_value = ([], 22050)
+    mock_librosa.get_duration.return_value = 100.0
+
+    # 200 frames total, roughly 0.5s per frame
+    rms_vals = np.zeros(200)
+    onset_vals = np.zeros(200)
+
+    # Create main drop at idx 40 (approx 20s)
+    rms_vals[35:45] = 1.0
+    # Create second drop at idx 120 (approx 60s)
+    rms_vals[115:125] = 0.9
+
+    mock_librosa.feature.rms.return_value = [rms_vals]
+    mock_librosa.frames_to_time.return_value = np.linspace(0, 100, 200)
+    mock_librosa.onset.onset_strength.return_value = onset_vals
+
+    with patch.object(audio_analyzer, 'librosa', mock_librosa):
+        sections = audio_analyzer.detect_song_sections("dummy.mp3", main_drop_time=20.0)
+
+        # Ensure we detected both drops
+        drops = [s for s in sections if s.phase == "drop"]
+        assert len(drops) >= 2
+        # Check that we have a buildup for the second drop
+        buildups = [s for s in sections if s.phase == "buildup"]
+        assert len(buildups) >= 1
+
+def test_build_cut_schedule_negative_beats():
+    """Test build_cut_schedule with negative or weird beat times handled gracefully."""
+    import audio_analyzer
+    # First beat is -1.0, should still work but with no forced 0.0 cut since first beat is not > 0.05
+    beat_times = [-1.0, 0.0, 1.0, 2.0]
+    hard_beat_times = [1.0]
+    sections = [audio_analyzer.SongSection(0.0, 5.0, "verse", 0.5)]
+
+    cuts = audio_analyzer.build_cut_schedule(beat_times, sections, hard_beat_times, 2.5)
+
+    # First cut should be 1.0 (negative beat gets filtered out)
+    assert len(cuts) > 0
+    assert cuts[0].time == 1.0
+
+@patch("audio_analyzer.librosa")
+def test_detect_song_sections_wrong_format(mock_librosa):
+    """Test detect_song_sections handling wrong file format or loading error."""
+    import audio_analyzer
+    mock_librosa.load.side_effect = Exception("Invalid file format")
+    with pytest.raises(Exception, match="Invalid file format"):
+        audio_analyzer.detect_song_sections("wrong_format.xyz")
