@@ -420,3 +420,176 @@ def test_find_highlights_gap_filling(tmp_path, monkeypatch):
     for i in range(len(clips)):
         for j in range(i + 1, len(clips)):
             assert abs(clips[i].timestamp - clips[j].timestamp) >= 1.0
+
+
+def test_compute_optical_flow_gpu_empty(monkeypatch):
+    import video_analyzer
+    mock_cap = MagicMock()
+    mock_cap.read.return_value = (False, None)
+
+    mock_cuda = MagicMock()
+    monkeypatch.setattr(video_analyzer.cv2, 'cuda', mock_cuda)
+
+    flow_data = video_analyzer._compute_optical_flow_gpu(mock_cap, total_frames=10, fps=30.0)
+    assert flow_data == []
+
+def test_compute_optical_flow_gpu_success(monkeypatch):
+    import video_analyzer
+    mock_cap = MagicMock()
+    frame = np.ones((100, 100, 3), dtype=np.uint8) * 128
+    mock_cap.read.side_effect = [(True, frame), (True, frame), (False, None)]
+
+    mock_flow_inst = MagicMock()
+    mock_gpu_flow = MagicMock()
+    mock_gpu_flow.download.return_value = np.zeros((50, 50, 2), dtype=np.float32)
+    mock_flow_inst.calc.return_value = mock_gpu_flow
+
+    mock_cuda = MagicMock()
+    mock_cuda.FarnebackOpticalFlow.create.return_value = mock_flow_inst
+
+    class DummyGpuMat:
+        def upload(self, arr): pass
+    mock_cuda.cuda_GpuMat = DummyGpuMat
+
+    monkeypatch.setattr(video_analyzer.cv2, 'cuda', mock_cuda)
+    monkeypatch.setattr(video_analyzer.cv2, 'cuda_GpuMat', DummyGpuMat, raising=False)
+
+    flow_data = video_analyzer._compute_optical_flow_gpu(mock_cap, total_frames=10, fps=30.0)
+    assert len(flow_data) == 1
+    assert "motion_score" in flow_data[0]
+
+
+def test_compute_optical_flow_cpu_empty_frame():
+    """Test _compute_optical_flow_cpu when video is completely empty."""
+    import video_analyzer
+    mock_cap = MagicMock()
+    mock_cap.read.return_value = (False, None)
+    flow_data = video_analyzer._compute_optical_flow_cpu(mock_cap, total_frames=10, fps=30.0)
+    assert flow_data == []
+
+def test_analyze_telemetry_valid_csv(tmp_path):
+    """Test _analyze_telemetry with a valid CSV file."""
+    import video_analyzer
+    import pandas as pd
+
+    video_path = tmp_path / "test_video.mp4"
+    csv_path = tmp_path / "test_video_telemetry.csv"
+
+    # Create valid CSV
+    df = pd.DataFrame({
+        "Time": [0.0, 0.5, 1.0],
+        "G_Lat": [0.0, 1.0, 0.0],
+        "G_Long": [0.0, 1.0, 0.0]
+    })
+    df.to_csv(csv_path, index=False)
+
+    scores = video_analyzer._analyze_telemetry(str(video_path), total_frames=30, fps=30.0)
+    assert len(scores) == 30
+    assert np.max(scores) <= 1.0
+    assert np.min(scores) >= 0.0
+
+def test_run_yolo_batch_success():
+    """Test _run_yolo_batch with valid frames and model prediction."""
+    import video_analyzer
+    mock_model = MagicMock()
+
+    # Create dummy results
+    class DummyResult:
+        def __init__(self, num_boxes):
+            self.boxes = [1] * num_boxes
+
+    mock_model.predict.return_value = [DummyResult(2), DummyResult(0)]
+
+    frames = [np.zeros((10, 10, 3)), np.zeros((10, 10, 3))]
+    counts = video_analyzer._run_yolo_batch(mock_model, frames, [2, 3, 5, 7])
+
+    assert len(counts) == 2
+    assert counts == [2.0, 0.0]
+
+
+def test_analyze_audio_with_invalid_audio_track(monkeypatch, tmp_path):
+    """Test _analyze_audio when the video has no audio or raises an exception internally."""
+    import video_analyzer
+    video_path = tmp_path / "dummy.mp4"
+    video_path.touch()
+
+    # We patch VideoFileClip to simulate no audio
+    mock_clip = MagicMock()
+    mock_clip.audio = None
+
+    with patch.object(video_analyzer, 'VideoFileClip', return_value=mock_clip):
+        scores = video_analyzer._analyze_audio(str(video_path), 30, 30.0)
+        assert len(scores) == 30
+        assert np.all(scores == 0.0)
+
+
+def test_analyze_audio_success(monkeypatch, tmp_path):
+    import video_analyzer
+    video_path = tmp_path / "dummy.mp4"
+    video_path.touch()
+
+    mock_clip = MagicMock()
+    mock_audio = MagicMock()
+    mock_clip.audio = mock_audio
+
+    mock_librosa = MagicMock()
+    mock_librosa.load.return_value = (np.array([0.1]*200000), 22050)
+    mock_librosa.feature.rms.return_value = [np.array([0.1, 0.2, 0.3])]
+    mock_librosa.frames_to_time.return_value = np.array([0.0, 0.5, 1.0])
+
+    monkeypatch.setattr(video_analyzer, 'librosa', mock_librosa)
+
+    with patch.object(video_analyzer, 'VideoFileClip', return_value=mock_clip):
+        with patch.object(video_analyzer.os, 'remove') as mock_remove:
+            scores = video_analyzer._analyze_audio(str(video_path), 30, 30.0)
+            assert len(scores) == 30
+            mock_remove.assert_called_once()
+            assert np.max(scores) <= 1.0
+
+def test_analyze_audio_exception(tmp_path):
+    """Test _analyze_audio handling exception properly."""
+    import video_analyzer
+    video_path = tmp_path / "dummy.mp4"
+    video_path.touch()
+
+    with patch.object(video_analyzer, 'VideoFileClip', side_effect=Exception("Failed audio")):
+        scores = video_analyzer._analyze_audio(str(video_path), 30, 30.0)
+        assert len(scores) == 30
+        assert np.all(scores == 0.0)
+
+def test_analyze_telemetry_exception(tmp_path):
+    """Test _analyze_telemetry handling exception properly."""
+    import video_analyzer
+    video_path = tmp_path / "dummy.mp4"
+    video_path.touch()
+
+    csv_path = tmp_path / "dummy_telemetry.csv"
+    csv_path.touch()
+
+    with patch("pandas.read_csv", side_effect=Exception("Failed CSV")):
+        scores = video_analyzer._analyze_telemetry(str(video_path), 30, 30.0)
+        assert len(scores) == 30
+        assert np.all(scores == 0.0)
+
+
+def test_compute_optical_flow_fallback_exception(monkeypatch):
+    import video_analyzer
+
+    mock_cap = MagicMock()
+    mock_cap.read.return_value = (False, None)
+
+    def failing_gpu(*args, **kwargs):
+        raise Exception("CUDA failed")
+
+    def success_cpu(*args, **kwargs):
+        return [{"motion_score": 10.0, "drift_score": 5.0, "cam_type": "helmet"},
+                {"motion_score": 20.0, "drift_score": 10.0, "cam_type": "external"}]
+
+    monkeypatch.setattr(video_analyzer, '_check_cuda', lambda: True)
+    monkeypatch.setattr(video_analyzer, '_compute_optical_flow_gpu', failing_gpu)
+    monkeypatch.setattr(video_analyzer, '_compute_optical_flow_cpu', success_cpu)
+
+    flow_data = video_analyzer._compute_optical_flow(mock_cap, total_frames=10, fps=30.0)
+    assert len(flow_data) == 2
+    # 95th percentile of [10.0, 20.0] is 19.5
+    assert np.isclose(flow_data[0]["motion_score"], 10.0 / 19.5)
