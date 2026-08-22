@@ -574,6 +574,8 @@ def test_lut_teal_orange_torch_extreme_values_mocked(monkeypatch):
 
 def test_grade_frame_torch_full_features_mocked(monkeypatch):
     """Test _grade_frame_torch with all features enabled (LUT, crush, bloom, vignette) using mocks."""
+    color_grading._vignette_cache_gpu.clear()
+    color_grading._GAUSS_KERNEL_GPU = None
     try:
         import torch
     except ImportError:
