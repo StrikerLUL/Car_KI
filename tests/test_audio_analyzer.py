@@ -259,3 +259,280 @@ def test_build_cut_schedule_drop_phase_no_forced_zero():
     assert cut_points[0].time >= 0.0
     for cp in cut_points:
         assert cp.phase == "drop"
+
+def test_energy_in_range():
+    """Test _energy_in_range helper."""
+    import audio_analyzer
+    import numpy as np
+
+    times = np.array([0.0, 1.0, 2.0, 3.0, 4.0])
+    energy = np.array([0.1, 0.5, 0.9, 0.2, 0.1])
+
+    # Matching range
+    vals = audio_analyzer._energy_in_range(energy, times, 0.5, 2.5)
+    assert np.array_equal(vals, np.array([0.5, 0.9]))
+
+    # Non-matching range
+    vals_empty = audio_analyzer._energy_in_range(energy, times, 5.0, 6.0)
+    assert np.array_equal(vals_empty, np.array([0.0]))
+
+def test_build_cut_schedule_buildup_stride():
+    """Test build_cut_schedule logic for buildup phase strides."""
+    from audio_analyzer import build_cut_schedule, SongSection
+    beat_times = [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0]
+    hard_beat_times = []
+
+    # Simulate a buildup phase from 0.0 to 4.0
+    sections = [SongSection(0.0, 4.0, "buildup", 0.8)]
+
+    cut_points = build_cut_schedule(beat_times, sections, hard_beat_times, 5.0)
+
+    # Check that cuts are made and buildup stride logic runs without errors
+    assert len(cut_points) > 0
+    for cp in cut_points:
+        assert cp.phase == "buildup"
+
+
+
+
+
+
+
+
+
+
+
+def test_detect_song_sections_multiple_drops_and_buildups():
+    """Test detect_song_sections handling multiple drop and buildup sections."""
+    import audio_analyzer
+    import numpy as np
+    from unittest.mock import MagicMock, patch
+
+    mock_librosa = MagicMock()
+    # Mocking long audio (e.g. 60s)
+    mock_librosa.load.return_value = (np.zeros(22050 * 60), 22050)
+    mock_librosa.get_duration.return_value = 60.0
+
+    num_frames = 600
+    fake_rms = np.zeros((1, num_frames))
+    fake_rms[0, 200:300] = 5.0 # Drop 1 (around 20-30s)
+    fake_rms[0, 400:500] = 5.0 # Drop 2 (around 40-50s)
+    fake_rms[0, :10] = 0.5
+
+    mock_librosa.feature.rms.return_value = fake_rms
+    mock_librosa.frames_to_time.return_value = np.linspace(0.0, 60.0, num_frames)
+    mock_librosa.onset.onset_strength.return_value = np.zeros(num_frames)
+
+    with patch.object(audio_analyzer, 'librosa', mock_librosa):
+        sections = audio_analyzer.detect_song_sections("dummy.mp3", main_drop_time=25.0)
+        phases = [s.phase for s in sections]
+
+        # We expect at least two drops.
+        assert phases.count("drop") >= 2
+        # And potentially buildups before the drops
+        assert "buildup" in phases
+
+
+def test_detect_song_sections_gap_filling():
+    """Test detect_song_sections gap filling logic (bridge vs verse)."""
+    import audio_analyzer
+    import numpy as np
+    from unittest.mock import MagicMock, patch
+
+    mock_librosa = MagicMock()
+    # Mocking audio of 30s
+    mock_librosa.load.return_value = (np.zeros(22050 * 30), 22050)
+    mock_librosa.get_duration.return_value = 30.0
+
+    # Create a small drop at the beginning, followed by a gap, then outro
+    num_frames = 300
+    fake_rms = np.zeros((1, num_frames))
+    fake_rms[0, 10:50] = 5.0 # Drop
+    fake_rms[0, 250:] = 5.0 # Outro spike
+
+    mock_librosa.feature.rms.return_value = fake_rms
+    mock_librosa.frames_to_time.return_value = np.linspace(0.0, 30.0, num_frames)
+    mock_librosa.onset.onset_strength.return_value = np.zeros(num_frames)
+
+    with patch.object(audio_analyzer, 'librosa', mock_librosa):
+        sections = audio_analyzer.detect_song_sections("dummy.mp3", main_drop_time=3.0)
+        phases = [s.phase for s in sections]
+
+        # There should be a gap after the first drop, which gets filled with 'bridge'
+        assert "bridge" in phases
+
+def test_detect_song_sections_break_conditions():
+    """Test detect_song_sections break conditions in the drop search loop."""
+    import audio_analyzer
+    import numpy as np
+    from unittest.mock import MagicMock, patch
+
+    mock_librosa = MagicMock()
+    # Mocking audio of 30s
+    mock_librosa.load.return_value = (np.zeros(22050 * 30), 22050)
+    mock_librosa.get_duration.return_value = 30.0
+
+    # We want a drop, but the rest of the song is just empty energy (triggering the window length break or low peak break)
+    num_frames = 300
+    fake_rms = np.zeros((1, num_frames))
+    fake_rms[0, 10:50] = 5.0 # Main Drop (0.0 to 3.0s is intro/drop)
+    # No more energy spikes, so it hits the `else: break` when searching for another drop.
+
+    mock_librosa.feature.rms.return_value = fake_rms
+    # Let's make it so that the time arrays are short, or manipulated so `idx_start >= idx_end` can trigger
+    mock_librosa.frames_to_time.return_value = np.linspace(0.0, 30.0, num_frames)
+    mock_librosa.onset.onset_strength.return_value = np.zeros(num_frames)
+
+    with patch.object(audio_analyzer, 'librosa', mock_librosa):
+        # We explicitly set main_drop_time = 3.0
+        sections = audio_analyzer.detect_song_sections("dummy.mp3", main_drop_time=3.0)
+        phases = [s.phase for s in sections]
+
+        assert "drop" in phases
+
+
+
+
+def test_detect_song_sections_break_empty_window():
+    """Test detect_song_sections break conditions in the drop search loop when window is empty."""
+    import audio_analyzer
+    import numpy as np
+    from unittest.mock import MagicMock, patch
+
+    mock_librosa = MagicMock()
+    mock_librosa.load.return_value = (np.zeros(22050 * 30), 22050)
+    mock_librosa.get_duration.return_value = 30.0
+
+    num_frames = 300
+    fake_rms = np.zeros((1, num_frames))
+    fake_rms[0, 10:50] = 5.0 # Main Drop
+
+    mock_librosa.feature.rms.return_value = fake_rms
+    times = np.linspace(0.0, 30.0, num_frames)
+
+    # We want the window `macro_energy[idx_start:idx_end]` to be empty.
+    # This happens if idx_start == idx_end.
+    # We can fake np.searchsorted to return the same index for both.
+
+    mock_librosa.frames_to_time.return_value = times
+    mock_librosa.onset.onset_strength.return_value = np.zeros(num_frames)
+
+    with patch.object(audio_analyzer, 'librosa', mock_librosa):
+        with patch("audio_analyzer.np.searchsorted", return_value=100) as mock_searchsorted:
+            sections = audio_analyzer.detect_song_sections("dummy.mp3", main_drop_time=3.0)
+            assert len(sections) > 0
+
+def test_detect_song_sections_break_len_window_zero():
+    """Test detect_song_sections break when window len is 0 but idx_start < idx_end."""
+    # This is an edge case that could theoretically happen if the slice returns empty
+    import audio_analyzer
+    import numpy as np
+    from unittest.mock import MagicMock, patch
+
+    mock_librosa = MagicMock()
+    mock_librosa.load.return_value = (np.zeros(22050 * 30), 22050)
+    mock_librosa.get_duration.return_value = 30.0
+
+    num_frames = 300
+    fake_rms = np.zeros((1, num_frames))
+    fake_rms[0, 10:50] = 5.0 # Main Drop
+
+    mock_librosa.feature.rms.return_value = fake_rms
+    times = np.linspace(0.0, 30.0, num_frames)
+
+    mock_librosa.frames_to_time.return_value = times
+    mock_librosa.onset.onset_strength.return_value = np.zeros(num_frames)
+
+    # We mock numpy array slicing for macro_energy to return an empty array
+    # We patch np.convolve since it returns macro_energy
+
+    class FakeArray(np.ndarray):
+        def __new__(cls, input_array):
+            obj = np.asarray(input_array).view(cls)
+            return obj
+        def __getitem__(self, key):
+            if isinstance(key, slice):
+                return [] # Return empty list for len(window) == 0
+            return super().__getitem__(key)
+
+    original_convolve = np.convolve
+    def mock_convolve(*args, **kwargs):
+        res = original_convolve(*args, **kwargs)
+        return FakeArray(res)
+
+    with patch.object(audio_analyzer, 'librosa', mock_librosa):
+        with patch("audio_analyzer.np.convolve", side_effect=mock_convolve):
+            sections = audio_analyzer.detect_song_sections("dummy.mp3", main_drop_time=3.0)
+            assert len(sections) > 0
+
+
+
+
+
+
+def test_detect_song_sections_skip_short():
+    """Test detect_song_sections skips phases shorter than 0.3s."""
+    import audio_analyzer
+    import numpy as np
+    from unittest.mock import MagicMock, patch
+
+    mock_librosa = MagicMock()
+    mock_librosa.load.return_value = (np.zeros(22050 * 5), 22050)
+    mock_librosa.get_duration.return_value = 5.0 # Very short duration
+
+    num_frames = 50
+    fake_rms = np.zeros((1, num_frames))
+    mock_librosa.feature.rms.return_value = fake_rms
+    mock_librosa.frames_to_time.return_value = np.linspace(0.0, 5.0, num_frames)
+    mock_librosa.onset.onset_strength.return_value = np.zeros(num_frames)
+
+    with patch.object(audio_analyzer, 'librosa', mock_librosa):
+        original_round = round
+        def fake_round(val, ndigits=None):
+            # If rounding anything, make them very close
+            # intro_end is usually 0.75
+            # outro_start is usually 4.4
+            # duration is 5.0
+            # Let's map everything to 0.0, 0.1, 0.2 to force differences < 0.3
+            return 0.1
+
+        with patch("builtins.round", side_effect=fake_round):
+            sections = audio_analyzer.detect_song_sections("dummy.mp3")
+            # Since all rounded values are 0.1, the difference is 0.0 < 0.3
+            assert len(sections) == 0
+
+def test_cut_point_repr():
+    """Test the __repr__ method of CutPoint."""
+    from audio_analyzer import CutPoint
+    cp = CutPoint(time=1.23, beat_index=0, beat_type="hard", phase="drop", clip_dur_hint=2.5, is_forced=True)
+    rep = repr(cp)
+    assert "1.23s" in rep
+    assert "drop" in rep
+    assert "hard" in rep
+    assert "[FORCED]" in rep
+
+    cp2 = CutPoint(time=4.56, beat_index=1, beat_type="normal", phase=None, clip_dur_hint=1.0, is_forced=False)
+    rep2 = repr(cp2)
+    assert "4.56s" in rep2
+    assert "?" in rep2
+    assert "[FORCED]" not in rep2
+
+def test_song_section_repr():
+    """Test the __repr__ method of SongSection."""
+    from audio_analyzer import SongSection
+    ss = SongSection(start=10.5, end=20.0, phase="drop", energy=0.85)
+    rep = repr(ss)
+    assert "SongSection" in rep
+    assert "drop" in rep
+    assert "10.50s" in rep
+    assert "20.00s" in rep
+    assert "energy=0.85" in rep
+
+def test_detect_song_sections_wrong_format():
+    """Test detect_song_sections with wrong file format or loading error."""
+    import audio_analyzer
+    from unittest.mock import patch
+    with patch("audio_analyzer.librosa.load", side_effect=Exception("Invalid file format")):
+        import pytest
+        with pytest.raises(Exception, match="Invalid file format"):
+            audio_analyzer.detect_song_sections("wrong_format.txt")
