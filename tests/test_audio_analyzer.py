@@ -259,3 +259,89 @@ def test_build_cut_schedule_drop_phase_no_forced_zero():
     assert cut_points[0].time >= 0.0
     for cp in cut_points:
         assert cp.phase == "drop"
+
+def test_energy_in_range_empty():
+    import audio_analyzer
+    import numpy as np
+
+    energy = np.array([0.1, 0.5, 0.9])
+    times = np.array([0.0, 1.0, 2.0])
+
+    # normal
+    assert np.array_equal(audio_analyzer._energy_in_range(energy, times, 0.5, 1.5), np.array([0.5]))
+
+    # out of bounds
+    assert np.array_equal(audio_analyzer._energy_in_range(energy, times, 3.0, 4.0), np.array([0.0]))
+
+    # inverted range
+    assert np.array_equal(audio_analyzer._energy_in_range(energy, times, 2.0, 1.0), np.array([0.0]))
+
+
+def test_cut_point_repr():
+    import audio_analyzer
+
+    cp1 = audio_analyzer.CutPoint(time=1.5, phase="verse", beat_type="normal", clip_dur_hint=2.5, is_forced=False, beat_index=1)
+    assert repr(cp1) == "CutPoint(  1.50s | verse    | normal | dur=2.50s)"
+
+    cp2 = audio_analyzer.CutPoint(time=2.0, phase=None, beat_type="soft", clip_dur_hint=1.23, is_forced=True, beat_index=2)
+    assert repr(cp2) == "CutPoint(  2.00s | ?        | soft   | dur=1.23s [FORCED])"
+
+
+def test_song_section_repr():
+    import audio_analyzer
+
+    sec = audio_analyzer.SongSection(phase="drop", start=1.52, end=4.12, energy=0.87)
+    assert repr(sec) == "SongSection(drop     |   1.52s–  4.12s | energy=0.87)"
+
+
+def test_build_cut_schedule_buildup_stride():
+    import audio_analyzer
+
+    beat_times = [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0]
+    # buildup von 1.0 bis 3.0
+    sections = [
+        audio_analyzer.SongSection(phase="buildup", start=1.0, end=3.0, energy=0.6),
+        audio_analyzer.SongSection(phase="drop", start=3.0, end=5.0, energy=0.9)
+    ]
+
+    # Ohne hard beats
+    cuts = audio_analyzer.build_cut_schedule(beat_times=beat_times, hard_beat_times=[], sections=sections, audio_duration=5.0)
+
+    # Verify the cuts
+    # Since it's a buildup, stride changes based on progress
+    # We just need to make sure we hit the code path and get some valid cuts
+    assert len(cuts) > 0
+    assert any(c.phase == "buildup" for c in cuts)
+    assert any(c.phase == "drop" for c in cuts)
+
+
+def test_buildup_progress_out_of_bounds():
+    import audio_analyzer
+    beat_times = [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0]
+    sections = [
+        audio_analyzer.SongSection(phase="buildup", start=2.0, end=4.0, energy=0.6)
+    ]
+    # We call build_cut_schedule with beat times before the buildup to trigger buildup_progress fallback
+    cuts = audio_analyzer.build_cut_schedule(beat_times=beat_times, hard_beat_times=[], sections=sections, audio_duration=5.0)
+    assert len(cuts) > 0
+
+def test_extract_beats_invalid_file_format():
+    import audio_analyzer
+    import pytest
+    from unittest.mock import patch
+
+    with patch("audio_analyzer.librosa.load", side_effect=Exception("Invalid audio file format")):
+        with pytest.raises(Exception, match="Invalid audio file format"):
+            audio_analyzer.extract_beats("invalid_file.txt")
+
+def test_energy_in_range_empty_input():
+    import audio_analyzer
+    import numpy as np
+
+    # Empty input arrays
+    energy = np.array([])
+    times = np.array([])
+
+    # Should fall back to np.array([0.0])
+    result = audio_analyzer._energy_in_range(energy, times, 0.0, 1.0)
+    assert np.array_equal(result, np.array([0.0]))
