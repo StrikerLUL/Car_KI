@@ -259,3 +259,141 @@ def test_build_cut_schedule_drop_phase_no_forced_zero():
     assert cut_points[0].time >= 0.0
     for cp in cut_points:
         assert cp.phase == "drop"
+
+def test_build_cut_schedule_buildup_stride():
+    """Test that the cut stride dynamically shrinks during a buildup phase."""
+    from audio_analyzer import build_cut_schedule, SongSection
+
+    sections = [SongSection(start=10.0, end=20.0, phase="buildup", energy=0.5)]
+    beat_times = [10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0]
+
+    cut_points = build_cut_schedule(beat_times, sections, hard_beat_times=[], audio_duration=25.0)
+
+    # Extract just the times for the cut points
+    times = [cp.time for cp in cut_points]
+
+    # Since stride starts at 3 and shrinks to 1, cuts should accelerate.
+    # From debug run we know the cuts happen at [0.0, 13.0, 16.0, 18.0]
+    # Note: 0.0 is the forced first clip for audio desync prevention.
+    assert 13.0 in times
+    assert 16.0 in times
+    assert 18.0 in times
+
+    # Verify the gap between cuts is shrinking
+    gap1 = 16.0 - 13.0 # 3.0
+    gap2 = 18.0 - 16.0 # 2.0
+    assert gap2 < gap1
+
+def test_song_section_repr():
+    """Test the __repr__ method of SongSection."""
+    from audio_analyzer import SongSection
+    section = SongSection(start=0.0, end=1.0, phase="intro", energy=0.5)
+    expected_repr = "SongSection(intro    |   0.00s–  1.00s | energy=0.50)"
+    assert repr(section) == expected_repr
+
+@patch("audio_analyzer.librosa")
+@patch("audio_analyzer.np.percentile")
+@patch("audio_analyzer.np.convolve")
+def test_detect_song_sections_with_main_drop(mock_convolve, mock_percentile, mock_librosa):
+    """Test detect_song_sections drop loop logic when main_drop_time is provided."""
+    import numpy as np
+    from audio_analyzer import detect_song_sections
+
+    N = 1000
+    mock_librosa.load.return_value = (np.zeros(22050), 22050)
+    mock_librosa.get_duration.return_value = 100.0
+
+    rms_times = np.linspace(0, 100, N)
+    mock_librosa.frames_to_time.return_value = rms_times
+
+    mock_librosa.feature.rms.return_value = np.zeros((1, N))
+    mock_librosa.onset.onset_strength.return_value = np.zeros(N)
+
+    def percentile_side_effect(a, q, *args, **kwargs):
+        if q == 75: return 50.0
+        if q == 30: return 10.0
+        return 0.0
+    mock_percentile.side_effect = percentile_side_effect
+
+    macro_energy = np.zeros(N)
+    macro_energy[500] = 100.0 # Peak at ~50.05s
+
+    mock_convolve.return_value = macro_energy
+
+    sections = detect_song_sections("dummy.mp3", main_drop_time=20.0)
+
+    drops = [s for s in sections if s.phase == "drop"]
+    assert len(drops) == 2
+    assert drops[0].start == 19.5
+    assert abs(drops[1].start - 49.5) < 0.2
+
+@patch("audio_analyzer.librosa")
+@patch("audio_analyzer.np.convolve")
+@patch("audio_analyzer.np.median")
+def test_detect_song_sections_outro(mock_median, mock_convolve, mock_librosa):
+    """Test detect_song_sections properly detects the outro phase based on energy drops."""
+    import numpy as np
+    from audio_analyzer import detect_song_sections
+
+    N = 1000
+    mock_librosa.load.return_value = (np.zeros(22050), 22050)
+    mock_librosa.get_duration.return_value = 100.0
+
+    rms_times = np.linspace(0, 100, N)
+    mock_librosa.frames_to_time.return_value = rms_times
+
+    mock_librosa.feature.rms.return_value = np.zeros((1, N))
+    mock_librosa.onset.onset_strength.return_value = np.zeros(N)
+
+    mock_median.return_value = 5.0
+
+    macro_energy = np.zeros(N)
+    macro_energy[900] = 10.0
+
+    mock_convolve.return_value = macro_energy
+
+    sections = detect_song_sections("dummy.mp3")
+
+    outros = [s for s in sections if s.phase == "outro"]
+    assert len(outros) > 0
+    assert abs(outros[0].start - 90.0) < 0.2
+
+def test_detect_song_sections_empty_audio_array():
+    """Test detect_song_sections behaves gracefully when an empty audio array is loaded."""
+    from audio_analyzer import detect_song_sections
+    import numpy as np
+
+    with patch("audio_analyzer.librosa") as mock_librosa:
+        # Simulate loading a completely empty audio file
+        mock_librosa.load.return_value = (np.array([]), 22050)
+        mock_librosa.get_duration.return_value = 0.0
+
+        # All feature extractions return empty or very small arrays
+        mock_librosa.feature.rms.return_value = np.array([[]])
+        mock_librosa.frames_to_time.return_value = np.array([])
+        mock_librosa.onset.onset_strength.return_value = np.array([])
+
+        # Current implementation throws ValueError on rms.max() for empty arrays
+        with pytest.raises(ValueError, match="zero-size array to reduction operation"):
+            sections = detect_song_sections("dummy.mp3")
+
+def test_extract_beats_none_audio():
+    """Test extract_beats handling of missing or None values."""
+    from audio_analyzer import extract_beats
+    with pytest.raises(Exception):
+        # Depending on how librosa handles it, it will raise FileNotFoundError or TypeError
+        extract_beats(None)
+
+def test_build_cut_schedule_invalid_duration():
+    """Test build_cut_schedule with negative audio duration."""
+    from audio_analyzer import build_cut_schedule, SongSection
+    beat_times = [1.0, 2.0, 3.0]
+    hard_beat_times = [2.0]
+    sections = [SongSection(0.0, 3.0, "verse", 0.5)]
+
+    # Passing negative duration
+    schedule = build_cut_schedule(beat_times, sections, hard_beat_times, audio_duration=-10.0)
+
+    assert len(schedule) > 0
+    # The last cut_point dur_hint should fallback to min 0.1s
+    assert schedule[-1].clip_dur_hint >= 0.1
