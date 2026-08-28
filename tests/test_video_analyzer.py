@@ -1,3 +1,4 @@
+import pytest
 import sys
 from unittest.mock import MagicMock, patch
 import numpy as np
@@ -420,3 +421,91 @@ def test_find_highlights_gap_filling(tmp_path, monkeypatch):
     for i in range(len(clips)):
         for j in range(i + 1, len(clips)):
             assert abs(clips[i].timestamp - clips[j].timestamp) >= 1.0
+
+def test_compute_optical_flow_gpu_empty():
+    """Test _compute_optical_flow_gpu returns empty list when video reading fails on first frame."""
+    import video_analyzer
+    mock_cap = MagicMock()
+    mock_cap.read.return_value = (False, None)
+
+    mock_cv2 = MagicMock()
+    mock_flow = MagicMock()
+    mock_cv2.cuda.FarnebackOpticalFlow.create.return_value = mock_flow
+
+    with pytest.MonkeyPatch.context() as m:
+        m.setattr(video_analyzer, 'cv2', mock_cv2)
+        res = video_analyzer._compute_optical_flow_gpu(mock_cap, total_frames=10, fps=30.0)
+        assert res == []
+
+def test_compute_optical_flow_gpu_exception(monkeypatch):
+    """Test that _compute_optical_flow handles GPU failure and falls back to CPU."""
+    import video_analyzer
+    mock_cap = MagicMock()
+    mock_cap.read.return_value = (True, np.zeros((10, 10, 3), dtype=np.uint8))
+
+    def mock_gpu_flow(*args, **kwargs):
+        raise Exception("Simulated GPU failure")
+
+    monkeypatch.setattr(video_analyzer, '_CUDA_AVAILABLE', True)
+    monkeypatch.setattr(video_analyzer, '_compute_optical_flow_gpu', mock_gpu_flow)
+    monkeypatch.setattr(video_analyzer, '_compute_optical_flow_cpu', MagicMock(return_value=[{"motion_score": 1.0, "drift_score": 0.5, "cam_type": "helmet"}]))
+
+    res = video_analyzer._compute_optical_flow(mock_cap, total_frames=10, fps=30.0)
+    assert len(res) == 1
+    assert res[0]["motion_score"] == 1.0  # normalized is min(1.0, 1.0)
+    assert res[0]["drift_score"] == 1.0   # normalized is min(1.0, 1.0) due to scaling max logic
+    assert res[0]["cam_type"] == "helmet"
+
+
+
+def test_analyze_telemetry_valid_csv(monkeypatch):
+    """Test _analyze_telemetry with a valid CSV simulating pandas output."""
+    import video_analyzer
+    monkeypatch.setattr(video_analyzer.os.path, 'exists', MagicMock(return_value=True))
+
+    mock_df = MagicMock()
+    mock_df.columns = ["Time", "G_Lat", "G_Long"]
+
+    def mock_getitem(key):
+        if key == "Time":
+            return MagicMock(values=np.array([0.0, 1.0, 2.0]))
+        return MagicMock()
+
+    mock_df.__getitem__.side_effect = mock_getitem
+
+    mock_pd = MagicMock()
+    mock_pd.read_csv.return_value = mock_df
+
+    original_import = __import__
+    def side_effect_import(name, *args, **kwargs):
+        if name == 'pandas':
+            return mock_pd
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr('builtins.__import__', side_effect_import)
+
+    def custom_sqrt(x):
+        return MagicMock(values=np.array([1.0, 2.0, 1.0]))
+
+    monkeypatch.setattr(video_analyzer.np, 'sqrt', custom_sqrt)
+
+    scores = video_analyzer._analyze_telemetry("fake_video.mp4", 10, 30.0)
+    assert len(scores) == 10
+    assert scores.dtype == np.float32
+    assert np.max(scores) > 0.0
+    assert np.max(scores) <= 1.0
+
+
+def test_analyze_audio_exception_fallback(monkeypatch):
+    """Test that _analyze_audio returns a zeroed array if an exception occurs during extraction."""
+    import video_analyzer
+
+    def mock_videofileclip(*args, **kwargs):
+        raise Exception("Simulated moviepy or librosa failure")
+
+    monkeypatch.setattr(video_analyzer, 'VideoFileClip', mock_videofileclip)
+
+    scores = video_analyzer._analyze_audio("fake_video.mp4", total_frames=5, fps=30.0)
+
+    assert len(scores) == 5
+    assert np.array_equal(scores, np.zeros(5, dtype=np.float32))
