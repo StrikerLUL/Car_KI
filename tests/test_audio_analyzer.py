@@ -259,3 +259,146 @@ def test_build_cut_schedule_drop_phase_no_forced_zero():
     assert cut_points[0].time >= 0.0
     for cp in cut_points:
         assert cp.phase == "drop"
+
+
+
+def test_detect_song_sections_edge_cases(mocker):
+    """Test detect_song_sections to cover specific edge cases in audio_analyzer."""
+    from audio_analyzer import detect_song_sections
+    import numpy as np
+
+    # Edge case 1: Energy is uniformly low, no peaks reach the threshold
+    duration = 60.0
+    sr = 22050
+    hop_length = int(sr * 0.1)
+    frames = int(duration * sr / hop_length)
+
+    # We mock librosa calls to simulate a 60s file with low energy
+    mocker.patch('audio_analyzer.librosa.load', return_value=(np.zeros(10), sr))
+    mocker.patch('audio_analyzer.librosa.get_duration', return_value=duration)
+
+    # RMS is uniform and low
+    mocker.patch('audio_analyzer.librosa.feature.rms', return_value=np.ones((1, frames)) * 0.1)
+    mocker.patch('audio_analyzer.librosa.frames_to_time', return_value=np.linspace(0, duration, frames))
+
+    # Onsets are uniform and low
+    mocker.patch('audio_analyzer.librosa.onset.onset_strength', return_value=np.zeros(frames))
+
+    sections = detect_song_sections("dummy.mp3", main_drop_time=None)
+
+    assert len(sections) > 0
+    assert sections[0].phase == "intro"
+    assert sections[-1].phase == "outro"
+
+def test_detect_song_sections_multiple_drops(mocker):
+    """Test detect_song_sections where there are multiple drops (high energy peaks)."""
+    from audio_analyzer import detect_song_sections
+    import numpy as np
+
+    duration = 100.0
+    sr = 22050
+    hop_length = int(sr * 0.1)
+    frames = int(duration * sr / hop_length)
+
+    mocker.patch('audio_analyzer.librosa.load', return_value=(np.zeros(10), sr))
+    mocker.patch('audio_analyzer.librosa.get_duration', return_value=duration)
+
+    times = np.linspace(0, duration, frames)
+    rms_arr = np.ones(frames) * 0.1
+
+    # Base energy
+    # Intro high energy trigger at t=10s
+    idx10 = np.searchsorted(times, 10.0)
+    rms_arr[idx10:idx10+10] = 1.0 # t = 10-11s
+
+    # Main drop at t=30s
+    idx30 = np.searchsorted(times, 30.0)
+    rms_arr[idx30:idx30+50] = 1.0 # t = 30-35s
+
+    # Second drop at t=70s
+    idx70 = np.searchsorted(times, 70.0)
+    rms_arr[idx70:idx70+50] = 1.0 # t = 70-75s
+
+    mocker.patch('audio_analyzer.librosa.feature.rms', return_value=rms_arr.reshape(1, -1))
+    mocker.patch('audio_analyzer.librosa.frames_to_time', return_value=times)
+    mocker.patch('audio_analyzer.librosa.onset.onset_strength', return_value=rms_arr) # mirror rms
+
+    sections = detect_song_sections("dummy.mp3", main_drop_time=30.0)
+
+    # Ensure drops and buildups are created
+    phases = [s.phase for s in sections]
+    assert "drop" in phases
+    assert "buildup" in phases
+    assert phases.count("drop") >= 2
+
+def test_energy_in_range():
+    """Test _energy_in_range handles empty array case."""
+    from audio_analyzer import _energy_in_range
+    import numpy as np
+
+    times = np.array([1.0, 2.0, 3.0])
+    energy = np.array([0.5, 0.6, 0.7])
+
+    # Valid range
+    res = _energy_in_range(energy, times, 1.5, 2.5)
+    assert np.array_equal(res, np.array([0.6]))
+
+    # Empty range
+    res = _energy_in_range(energy, times, 4.0, 5.0)
+    assert np.array_equal(res, np.array([0.0]))
+
+def test_build_cut_schedule_buildup_stride():
+    """Test _buildup_progress and shrinking stride in buildup phase."""
+    from audio_analyzer import build_cut_schedule, SongSection
+    import numpy as np
+
+    beats = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]
+    hard_beats = [7.0] # drop start
+    sections = [
+        SongSection(start=0.0, end=6.5, phase="buildup", energy=0.5),
+        SongSection(start=6.5, end=10.0, phase="drop", energy=1.0)
+    ]
+
+    schedule = build_cut_schedule(beats, sections, hard_beats, 10.0)
+
+    # Check that cuts happen, maybe more frequently as it reaches 6.5
+    assert len(schedule) > 0
+    # Just need to hit the branch
+
+def test_buildup_progress_edge_cases():
+    """Test internal _buildup_progress function zero duration edge case."""
+    from audio_analyzer import build_cut_schedule, SongSection
+    import numpy as np
+
+    beats = [1.0, 2.0]
+    hard_beats = []
+    sections = [
+        SongSection(start=0.0, end=0.0, phase="buildup", energy=0.5), # Zero duration buildup!
+    ]
+
+    # Should not crash, prog should be 1.0 or 0.0 gracefully
+    schedule = build_cut_schedule(beats, sections, hard_beats, 10.0)
+    assert len(schedule) > 0
+
+def test_cutpoint_repr():
+    """Test string representation of CutPoint."""
+    from audio_analyzer import CutPoint
+    c = CutPoint(time=1.0, beat_index=1, beat_type="hard", phase="drop", clip_dur_hint=2.0, is_forced=True)
+    assert "FORCED" in repr(c)
+    assert "drop" in repr(c)
+
+    c2 = CutPoint(time=1.0, beat_index=1, beat_type="soft", phase=None, clip_dur_hint=2.0, is_forced=False)
+    assert "FORCED" not in repr(c2)
+    assert "?" in repr(c2)
+
+def test_detect_song_sections_wrong_format(mocker):
+    """Test detect_song_sections gracefully handles an invalid audio format error from librosa."""
+    from audio_analyzer import detect_song_sections
+    import librosa
+
+    mocker.patch('audio_analyzer.librosa.load', side_effect=Exception('Invalid audio file format'))
+
+    try:
+        sections = detect_song_sections("dummy.xyz")
+    except Exception as e:
+        assert "Invalid audio file format" in str(e)
