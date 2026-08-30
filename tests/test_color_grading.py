@@ -492,6 +492,8 @@ def test_grade_frame_torch_full_features():
 
     frame = np.ones((100, 100, 3), dtype=np.uint8) * 128
 
+    color_grading._vignette_cache_gpu = {}
+
     try:
         result = color_grading._grade_frame_torch(frame, grade)
         assert result.shape == (100, 100, 3)
@@ -593,6 +595,9 @@ def test_grade_frame_torch_full_features_mocked(monkeypatch):
     )
 
     frame = np.ones((100, 100, 3), dtype=np.uint8) * 128
+
+    # clear vignette cache explicitly to prevent str/MagicMock pollution from other tests
+    color_grading._vignette_cache_gpu.clear()
 
     try:
         result = color_grading._grade_frame_torch(frame, grade)
