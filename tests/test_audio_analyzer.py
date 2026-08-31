@@ -259,3 +259,73 @@ def test_build_cut_schedule_drop_phase_no_forced_zero():
     assert cut_points[0].time >= 0.0
     for cp in cut_points:
         assert cp.phase == "drop"
+
+def test_energy_in_range_invalid_times():
+    """Test _energy_in_range with inverted time range."""
+    from audio_analyzer import _energy_in_range
+    import numpy as np
+
+    energy = np.array([0.1, 0.5, 0.9])
+    times = np.array([0.0, 1.0, 2.0])
+
+    # Inverted time range: t_start > t_end
+    result = _energy_in_range(energy, times, 2.0, 1.0)
+
+    assert len(result) == 1
+    assert result[0] == 0.0
+
+def test_build_cut_schedule_zero_duration_buildup():
+    """Test build_cut_schedule with a buildup phase of zero duration to prevent division by zero."""
+    from audio_analyzer import build_cut_schedule, SongSection
+
+    beat_times = [0.1, 0.5, 0.9, 1.3]
+    # zero duration buildup
+    sections = [SongSection(0.0, 0.0, "buildup", 0.5)]
+    hard_beat_times = []
+
+    # This shouldn't crash
+    cut_points = build_cut_schedule(beat_times, sections, hard_beat_times, 2.0)
+    assert len(cut_points) > 0
+
+def test_song_section_and_cutpoint_repr():
+    """Test string representation of SongSection and CutPoint handle edge cases gracefully."""
+    from audio_analyzer import SongSection, CutPoint
+
+    # Phase is None, is_forced is True
+    cp = CutPoint(time=1.23, beat_index=2, beat_type="hard", phase=None, clip_dur_hint=0.5, is_forced=True)
+    cp_repr = repr(cp)
+
+    assert "1.23s" in cp_repr
+    assert "?" in cp_repr
+    assert "hard" in cp_repr
+    assert "FORCED" in cp_repr
+
+    sec = SongSection(start=0.0, end=1.5, phase="intro", energy=0.1)
+    sec_repr = repr(sec)
+
+    assert "0.00s–  1.50s" in sec_repr
+    assert "intro" in sec_repr
+    assert "0.10" in sec_repr
+
+def test_detect_song_sections_all_zeros():
+    """Test detect_song_sections handles completely silent audio gracefully."""
+    import audio_analyzer
+    from unittest.mock import patch, MagicMock
+    import numpy as np
+
+    with patch("audio_analyzer.librosa") as mock_librosa:
+        # Mocking an empty/silent track with valid format but no energy
+        mock_librosa.load.return_value = (np.zeros(22050), 22050)
+        mock_librosa.get_duration.return_value = 10.0
+
+        # Zero RMS energy
+        mock_librosa.feature.rms.return_value = np.zeros((1, 431))
+        mock_librosa.frames_to_time.return_value = np.linspace(0, 10, 431)
+        mock_librosa.onset.onset_strength.return_value = np.zeros(431)
+
+        sections = audio_analyzer.detect_song_sections("silent.mp3")
+
+        # Should gracefully return at least one section without crashing
+        assert len(sections) > 0
+        # By default, everything would probably fall under 'verse' due to lack of distinct peaks
+        assert sections[0].phase in ["intro", "verse"]
