@@ -244,8 +244,31 @@ def run_pipeline(config: PipelineConfig, preview: bool = False, no_cache: bool =
     print("=" * 60)
 
 
+
+def validate_cli_args_at_start(args):
+    template_overrides = None
+    if args.template:
+        if not os.path.exists(args.template):
+            logging.error(f"Fehler: Template-Datei '{args.template}' nicht gefunden.")
+            sys.exit(1)
+        try:
+            template_overrides = load_edit_template(args.template)
+            print(f"  ✓ Template geladen: {args.template}")
+        except Exception as e:
+            logging.exception("Fehler: Template konnte nicht geladen werden.")
+            sys.exit(1)
+
+    if args.save_template:
+        save_dir = os.path.dirname(os.path.abspath(args.save_template))
+        if save_dir and not os.path.exists(save_dir):
+            logging.error(f"Fehler: Zielverzeichnis für save-template '{save_dir}' existiert nicht.")
+            sys.exit(1)
+
+    return template_overrides
+
 def main():
     args = _parse_args()
+    template_overrides = validate_cli_args_at_start(args)
 
     # ── Config-Validierung beim Start ────────────────────────────────────────
     if args.template:
@@ -447,17 +470,7 @@ def main():
         template_path=args.template,
     )
 
-    template_overrides = None
-    if args.template:
-        if not os.path.exists(args.template):
-            logging.error(f"Fehler: Template-Datei '{args.template}' nicht gefunden.")
-            sys.exit(1)
-        try:
-            template_overrides = load_edit_template(args.template)
-            print(f"  ✓ Template geladen: {args.template}")
-        except Exception as e:
-            logging.exception("Fehler: Template konnte nicht geladen werden.")
-            sys.exit(1)
+
 
     if args.save_template:
         try:
