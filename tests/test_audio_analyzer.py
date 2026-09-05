@@ -259,3 +259,97 @@ def test_build_cut_schedule_drop_phase_no_forced_zero():
     assert cut_points[0].time >= 0.0
     for cp in cut_points:
         assert cp.phase == "drop"
+
+from audio_analyzer import _energy_in_range
+
+def test_energy_in_range_empty():
+    """Test _energy_in_range for out-of-bounds queries returning a default [0.0] array."""
+    energy = np.array([0.1, 0.5, 0.9])
+    times = np.array([0.0, 1.0, 2.0])
+
+    # Query completely outside time range
+    res = _energy_in_range(energy, times, 5.0, 6.0)
+    assert len(res) == 1
+    assert res[0] == 0.0
+
+@patch("audio_analyzer.librosa.load")
+@patch("audio_analyzer.librosa.get_duration")
+@patch("audio_analyzer.librosa.feature.rms")
+@patch("audio_analyzer.librosa.onset.onset_strength")
+@patch("audio_analyzer.librosa.frames_to_time")
+def test_detect_song_sections_intro_high_energy(mock_ftt, mock_onset, mock_rms, mock_dur, mock_load):
+    """Test intro logic where energy exceeds median only later (t > 3.0)."""
+    from audio_analyzer import detect_song_sections
+    mock_load.return_value = (np.zeros(100), 22050)
+    mock_dur.return_value = 20.0
+    mock_rms.return_value = np.zeros((1, 200))
+    mock_onset.return_value = np.zeros(200)
+
+    # Simulate first peak at index 50 (t=5.0s)
+    rms_arr = np.ones((1, 200)) * 0.1
+    rms_arr[0, 50] = 1.0
+    mock_rms.return_value = rms_arr
+
+    times = np.linspace(0.0, 20.0, 200)
+    mock_ftt.return_value = times
+
+    sections = detect_song_sections("dummy.mp3", main_drop_time=None)
+    assert len(sections) > 0
+
+@patch("audio_analyzer.librosa.load")
+@patch("audio_analyzer.librosa.get_duration")
+@patch("audio_analyzer.librosa.feature.rms")
+@patch("audio_analyzer.librosa.onset.onset_strength")
+@patch("audio_analyzer.librosa.frames_to_time")
+def test_detect_song_sections_multiple_drops(mock_ftt, mock_onset, mock_rms, mock_dur, mock_load):
+    """Test logic to detect multiple drops / buildups."""
+    from audio_analyzer import detect_song_sections
+    mock_load.return_value = (np.zeros(100), 22050)
+    mock_dur.return_value = 60.0
+
+    # Simulate first drop at 100 (t=10.0s), second drop at 400 (t=40.0s)
+    rms_arr = np.ones((1, 600)) * 0.2
+    rms_arr[0, 100] = 0.9
+    rms_arr[0, 400] = 0.9
+    mock_rms.return_value = rms_arr
+    mock_onset.return_value = np.zeros(600)
+
+    times = np.linspace(0.0, 60.0, 600)
+    mock_ftt.return_value = times
+
+    sections = detect_song_sections("dummy.mp3", main_drop_time=10.0)
+    drops = [s for s in sections if s.phase == "drop"]
+    assert len(drops) >= 1
+
+def test_cutpoint_repr():
+    """Test string representation of CutPoint."""
+    cp = CutPoint(time=4.5, beat_index=2, beat_type="hard", phase="drop", clip_dur_hint=2.0, is_forced=True)
+    rep = repr(cp)
+    assert "[FORCED]" in rep
+    assert "4.50s" in rep
+
+    cp_unforced = CutPoint(time=2.0, beat_index=0, beat_type="normal", phase="verse", clip_dur_hint=1.5, is_forced=False)
+    rep_unforced = repr(cp_unforced)
+    assert "[FORCED]" not in rep_unforced
+
+@patch("audio_analyzer.librosa.load")
+def test_detect_song_sections_wrong_format(mock_load):
+    """Test detect_song_sections with invalid audio file format."""
+    from audio_analyzer import detect_song_sections
+    mock_load.side_effect = Exception("Invalid audio file format")
+    with pytest.raises(Exception, match="Invalid audio file format"):
+        detect_song_sections("dummy.txt")
+
+@patch("audio_analyzer.librosa.load")
+@patch("audio_analyzer.librosa.get_duration")
+@patch("audio_analyzer.librosa.feature.rms")
+@patch("audio_analyzer.librosa.onset.onset_strength")
+def test_detect_song_sections_empty_audio(mock_onset, mock_rms, mock_dur, mock_load):
+    """Test detect_song_sections with empty audio array."""
+    from audio_analyzer import detect_song_sections
+    mock_load.return_value = (np.array([]), 22050)
+    mock_dur.return_value = 0.0
+    mock_rms.return_value = np.array([[]])
+    mock_onset.return_value = np.array([])
+    with pytest.raises(ValueError, match="zero-size array to reduction operation maximum"):
+        detect_song_sections("empty.mp3")
