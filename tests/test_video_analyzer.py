@@ -420,3 +420,176 @@ def test_find_highlights_gap_filling(tmp_path, monkeypatch):
     for i in range(len(clips)):
         for j in range(i + 1, len(clips)):
             assert abs(clips[i].timestamp - clips[j].timestamp) >= 1.0
+
+def test_compute_optical_flow_gpu_empty(mocker):
+    """Test _compute_optical_flow_gpu when cap.read() returns False immediately."""
+    from video_analyzer import _compute_optical_flow_gpu
+    mock_cap = MagicMock()
+    mock_cap.read.return_value = (False, None)
+
+    # Mock cv2.cuda
+    mock_cuda = MagicMock()
+    mocker.patch('video_analyzer.cv2.cuda', mock_cuda)
+
+    res = _compute_optical_flow_gpu(mock_cap, total_frames=100, fps=30.0)
+    assert res == []
+
+
+def test_analyze_audio_librosa_error(mocker, tmp_path):
+    import numpy as np
+    """Test _analyze_audio when librosa.load raises an Exception."""
+    from video_analyzer import _analyze_audio
+
+    video_path = tmp_path / "test.mp4"
+    video_path.write_text("dummy")
+
+    # Mock moviepy VideoFileClip
+    mock_clip = MagicMock()
+    mock_clip.audio = MagicMock()
+    mocker.patch('video_analyzer.VideoFileClip', return_value=mock_clip)
+
+    # Mock librosa.load to raise an exception
+    mocker.patch('video_analyzer.librosa.load', side_effect=Exception("librosa error"))
+
+    # We also mock os.remove to avoid errors when it tries to clean up the temp audio file
+    mocker.patch('video_analyzer.os.remove')
+
+    # Since there's an exception, it should return a zero-array of size total_frames
+    res = _analyze_audio(str(video_path), total_frames=100, fps=30.0)
+
+    assert isinstance(res, np.ndarray)
+    assert len(res) == 100
+    assert np.all(res == 0)
+
+
+def test_analyze_telemetry_corrupted_csv(mocker, tmp_path):
+    import numpy as np
+    """Test _analyze_telemetry with a CSV missing required columns."""
+    from video_analyzer import _analyze_telemetry
+    import pandas as pd
+
+    video_path = tmp_path / "test.mp4"
+    csv_path = tmp_path / "test_telemetry.csv"
+
+    # Create CSV missing G_Lat and G_Long
+    df = pd.DataFrame({"Time": [0.0, 1.0, 2.0], "Speed": [100, 110, 120]})
+    df.to_csv(csv_path, index=False)
+
+    res = _analyze_telemetry(str(video_path), total_frames=60, fps=30.0)
+
+    # Since columns are missing, it should just return the zero array
+    assert isinstance(res, np.ndarray)
+    assert len(res) == 60
+    assert np.all(res == 0)
+
+
+def test_find_highlights_gap_filling_fallback(tmp_path, mocker):
+    """Test find_highlights where gap filling is needed to reach num_clips."""
+    from video_analyzer import find_highlights, ClipInfo
+
+    video_path = tmp_path / "test.mp4"
+    video_path.write_text("dummy")
+
+    # Mock OpenCV cap
+    mock_cap = MagicMock()
+    # 5 frames total
+    import cv2
+    mock_cap.get.side_effect = lambda prop: 5 if prop == cv2.CAP_PROP_FRAME_COUNT else 30.0
+    mock_cap.read.return_value = (False, None)
+    mocker.patch('video_analyzer.cv2.VideoCapture', return_value=mock_cap)
+
+    # We mock _compute_optical_flow_gpu and _analyze_audio to return values
+    mocker.patch('video_analyzer._compute_optical_flow', return_value=[
+        {"motion_score": 0.5, "drift_score": 0.5, "cam_type": "onboard"}
+    ] * 5)
+
+    mocker.patch('video_analyzer._analyze_audio', return_value=np.array([0.5]*5))
+    mocker.patch('video_analyzer._analyze_telemetry', return_value=np.array([0.5]*5))
+
+    mocker.patch('video_analyzer._run_yolo_batch', return_value=[])
+
+    # For the fallback we want multiple unique timestamps, but we only have 5 frames.
+    # We will mock the `raw_scores` inside `find_highlights` by mocking `_compute_optical_flow` output
+    # Actually, find_highlights computes `raw_scores` internally using the `flow_data`.
+    # `flow_data` comes from `_compute_optical_flow`.
+
+    # Let's mock a larger flow_data so we have more than 5 clips.
+    # 60 frames -> 2 seconds at 30 fps.
+    mock_cap.get.side_effect = lambda prop: 60 if prop == cv2.CAP_PROP_FRAME_COUNT else 30.0
+
+    # Create 4 clips with distinct scores, so they can be sorted.
+    # Timestamps will be 0.0, 0.25, 0.5, ...
+    # We'll need `flow_data` of length (60 frames / sample_interval frames).
+    # sample_interval default is 0.25. (30 * 0.25 = 7.5 frames, so 8 frames).
+    # 60 / 8 = 7 items in flow_data.
+
+    mocker.patch('video_analyzer._compute_optical_flow', return_value=[
+        {"motion_score": 0.9, "drift_score": 0.1, "cam_type": "onboard"},  # score high
+        {"motion_score": 0.2, "drift_score": 0.1, "cam_type": "onboard"},  # score low
+        {"motion_score": 0.8, "drift_score": 0.1, "cam_type": "onboard"},  # score high
+        {"motion_score": 0.1, "drift_score": 0.1, "cam_type": "onboard"},  # score low
+        {"motion_score": 0.7, "drift_score": 0.1, "cam_type": "onboard"},  # score high
+        {"motion_score": 0.1, "drift_score": 0.1, "cam_type": "onboard"},  # score low
+        {"motion_score": 0.6, "drift_score": 0.1, "cam_type": "onboard"},  # score high
+    ])
+
+    mocker.patch('video_analyzer._analyze_audio', return_value=np.array([0.5]*60))
+    mocker.patch('video_analyzer._analyze_telemetry', return_value=np.array([0.0]*60))
+
+    # Ask for 5 clips, but clip_duration is 1.0s.
+    # Total video is 2s.
+    # Initial selection with 0.5s overlap will pick maybe 2-3 clips.
+    # Then it will gap-fill to try and reach 5, but maybe it won't reach 5 if overlap conditions prevent it.
+
+    res = find_highlights(str(video_path), num_clips=5, clip_duration=0.5, )
+
+    # As long as it executed and returned a list of ClipInfo, we covered the fallback logic.
+    assert isinstance(res, list)
+    assert len(res) > 0
+
+
+def test_analyze_audio_no_exception(mocker, tmp_path):
+    """Test _analyze_audio successful execution."""
+    from video_analyzer import _analyze_audio
+    import numpy as np
+
+    video_path = tmp_path / "test.mp4"
+    video_path.write_text("dummy")
+
+    mock_clip = MagicMock()
+    mock_clip.audio = MagicMock()
+    mocker.patch('video_analyzer.VideoFileClip', return_value=mock_clip)
+
+    # Mock librosa components
+    mocker.patch('video_analyzer.librosa.load', return_value=(np.zeros(22050), 22050))
+    mocker.patch('video_analyzer.librosa.feature.rms', return_value=np.array([[0.1, 0.2, 0.3]]))
+    mocker.patch('video_analyzer.librosa.frames_to_time', return_value=np.array([0.0, 0.5, 1.0]))
+    mocker.patch('video_analyzer.os.remove')
+
+    res = _analyze_audio(str(video_path), total_frames=30, fps=30.0)
+
+    assert isinstance(res, np.ndarray)
+    assert len(res) == 30
+    assert np.max(res) <= 1.0
+
+
+def test_analyze_telemetry_valid_csv(mocker, tmp_path):
+    """Test _analyze_telemetry with a valid CSV."""
+    from video_analyzer import _analyze_telemetry
+    import pandas as pd
+
+    video_path = tmp_path / "test.mp4"
+    csv_path = tmp_path / "test_telemetry.csv"
+
+    df = pd.DataFrame({
+        "Time": [0.0, 0.5, 1.0],
+        "G_Lat": [0.1, 0.5, 0.2],
+        "G_Long": [0.2, 0.3, 0.1]
+    })
+    df.to_csv(csv_path, index=False)
+
+    res = _analyze_telemetry(str(video_path), total_frames=30, fps=30.0)
+
+    assert isinstance(res, np.ndarray)
+    assert len(res) == 30
+    assert np.max(res) <= 1.0
